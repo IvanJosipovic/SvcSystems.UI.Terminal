@@ -43,44 +43,6 @@ public partial class TerminalControlModel : ObservableObject, ITerminalDelegate
     public bool OptionAsMetaKey { get; set; } = true;
 
     /// <summary>
-    /// Gets a value indicating the relative position of the terminal scroller
-    /// </summary>
-    public double ScrollPosition
-    {
-        get
-        {
-            if (Terminal.Buffers.IsAlternateBuffer)
-                return 0;
-
-            // strictly speaking these ought not to be outside these bounds
-            if (Terminal.Buffer.YDisp <= 0)
-                return 0;
-
-            var maxScrollback = Terminal.Buffer.Lines.Length - Terminal.Rows;
-            if (Terminal.Buffer.YDisp >= maxScrollback)
-                return 1;
-
-            return (double)Terminal.Buffer.YDisp / (double)maxScrollback;
-        }
-    }
-
-    /// <summary>
-    /// Gets a value indicating the scroll thumbsize
-    /// </summary>
-    public float ScrollThumbsize
-    {
-        get
-        {
-            if (Terminal.Buffers.IsAlternateBuffer)
-                return 0;
-
-            // the thumb size is the proportion of the visible content of the
-            // entire content but don't make it too small
-            return Math.Max((float)Terminal.Rows / (float)Terminal.Buffer.Lines.Length, 0.01f);
-        }
-    }
-
-    /// <summary>
     /// Gets a value indicating whether or not the user can scroll the terminal contents
     /// </summary>
     public bool CanScroll
@@ -158,6 +120,7 @@ public partial class TerminalControlModel : ObservableObject, ITerminalDelegate
 
         Terminal?.Resize(cols, rows);
         RemoveItemsDictionary();
+        UpdateScroller();
 
         SizeChanged?.Invoke(cols, rows, width, height);
     }
@@ -222,8 +185,14 @@ public partial class TerminalControlModel : ObservableObject, ITerminalDelegate
         }
 
         //UpdateCursorPosition();
-        //UpdateScroller();
+        UpdateScroller();
         UpdateUI?.Invoke();
+    }
+
+    public void ScrollLines(int disp)
+    {
+        Terminal.ScrollLines(disp);
+        UpdateDisplay();
     }
 
     public void Feed(string text)
@@ -236,6 +205,11 @@ public partial class TerminalControlModel : ObservableObject, ITerminalDelegate
         SearchService?.Invalidate();
         Terminal?.Feed(text, length);
         UpdateDisplay();
+    }
+
+    private void UpdateScroller()
+    {
+        OnPropertyChanged(nameof(CanScroll));
     }
 
     private static TextObject SetStyling(TextObject control, CharData cd)

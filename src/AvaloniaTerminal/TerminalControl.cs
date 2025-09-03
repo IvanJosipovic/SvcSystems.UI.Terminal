@@ -1,25 +1,47 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
+using System;
+using System.ComponentModel;
 using System.Globalization;
 using XtermSharp;
 using Point = Avalonia.Point;
 
 namespace AvaloniaTerminal;
 
-public partial class TerminalControl : Control
+public partial class TerminalControl : Panel
 {
     private Size _consoleTextSize;
 
     private Typeface _typeface;
+
+    private const double ScrollBarWidth = 12;
+
+    private readonly ScrollBar _scrollBar;
+    private readonly TerminalPresenter _presenter;
+    private bool _ignoreScrollBarChange;
 
     public TerminalControl()
     {
         Focusable = true;
 
         this.Focus(NavigationMethod.Pointer);
+
+        _scrollBar = new ScrollBar
+        {
+            Orientation = Orientation.Vertical,
+            Width = ScrollBarWidth,
+            IsVisible = false
+        };
+        _scrollBar.PropertyChanged += ScrollBarChanged;
+
+        _presenter = new TerminalPresenter(this);
+        Children.Add(_presenter);
+        Children.Add(_scrollBar);
 
         CalculateTextSize();
     }
@@ -29,8 +51,25 @@ public partial class TerminalControl : Control
     public TerminalControlModel Model
     {
         get => GetValue(TerminalProperty);
-        set { SetValue(TerminalProperty, value);
-            Model.UpdateUI = InvalidateVisual;
+        set
+        {
+            if (Model != null)
+            {
+                Model.PropertyChanged -= ModelPropertyChanged;
+            }
+
+            SetValue(TerminalProperty, value);
+
+            if (value != null)
+            {
+                value.UpdateUI = () =>
+                {
+                    UpdateScrollBar();
+                    InvalidateVisual();
+                };
+                value.PropertyChanged += ModelPropertyChanged;
+                UpdateScrollBar();
+            }
         }
     }
 
@@ -317,6 +356,40 @@ public partial class TerminalControl : Control
         e.Handled = true;
     }
 
+    protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
+    {
+        base.OnPointerWheelChanged(e);
+
+        if (Model == null)
+        {
+            return;
+        }
+
+        var lines = (int)Math.Round(e.Delta.Y);
+        if (lines != 0)
+        {
+            Model.ScrollLines(-lines);
+        }
+
+        e.Handled = true;
+    }
+
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        var contentWidth = Math.Max(0, availableSize.Width - ScrollBarWidth);
+        _presenter.Measure(new Size(contentWidth, availableSize.Height));
+        _scrollBar.Measure(new Size(ScrollBarWidth, availableSize.Height));
+        return availableSize;
+    }
+
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        var sbWidth = _scrollBar.IsVisible ? ScrollBarWidth : 0;
+        _presenter.Arrange(new Rect(0, 0, finalSize.Width - sbWidth, finalSize.Height));
+        _scrollBar.Arrange(new Rect(finalSize.Width - sbWidth, 0, sbWidth, finalSize.Height));
+        return finalSize;
+    }
+
     protected override void OnSizeChanged(SizeChangedEventArgs e)
     {
         base.OnSizeChanged(e);
@@ -326,9 +399,53 @@ public partial class TerminalControl : Control
             return;
         }
 
-        Model.Resize(Bounds.Width, Bounds.Height, _consoleTextSize.Width, _consoleTextSize.Height);
+        var width = Bounds.Width - (_scrollBar.IsVisible ? ScrollBarWidth : 0);
+        Model.Resize(width, Bounds.Height, _consoleTextSize.Width, _consoleTextSize.Height);
         InvalidateVisual();
     }
+
+    private void ModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(TerminalControlModel.CanScroll))
+        {
+            UpdateScrollBar();
+        }
+    }
+
+    private void ScrollBarChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (e.Property == RangeBase.ValueProperty && !_ignoreScrollBarChange && Model != null)
+        {
+            var target = (int)Math.Round(_scrollBar.Value);
+            var diff = target - Model.Terminal.Buffer.YDisp;
+            if (diff != 0)
+            {
+                Model.ScrollLines(diff);
+            }
+        }
+    }
+
+    private void UpdateScrollBar()
+    {
+        if (Model == null)
+        {
+            return;
+        }
+
+        var max = Math.Max(0, Model.Terminal.Buffer.Lines.Length - Model.Terminal.Rows);
+        _scrollBar.Maximum = max;
+        _scrollBar.ViewportSize = Model.Terminal.Rows;
+        _ignoreScrollBarChange = true;
+        _scrollBar.Value = Model.Terminal.Buffer.YDisp;
+        _ignoreScrollBarChange = false;
+        _scrollBar.IsVisible = Model.CanScroll;
+        InvalidateArrange();
+
+        var width = Bounds.Width - (_scrollBar.IsVisible ? ScrollBarWidth : 0);
+        Model.Resize(width, Bounds.Height, _consoleTextSize.Width, _consoleTextSize.Height);
+    }
+
+    protected ScrollBar VerticalScrollBar => _scrollBar;
 
     public static Brush ConvertXtermColor(int xtermColor)
     {
@@ -346,9 +463,10 @@ public partial class TerminalControl : Control
         _consoleTextSize = run.Size;
     }
 
-    public override void Render(DrawingContext context)
+    internal void RenderTerminal(DrawingContext context)
     {
-        var rect = new Rect(0,0, Bounds.Width, Bounds.Height);
+        var contentWidth = Bounds.Width - (_scrollBar.IsVisible ? ScrollBarWidth : 0);
+        var rect = new Rect(0, 0, contentWidth, Bounds.Height);
         context.FillRectangle(ConvertXtermColor(0), rect);
 
         if (Model == null)
@@ -367,6 +485,21 @@ public partial class TerminalControl : Control
             formattedText.SetFontStyle(item.Value.FontStyle);
 
             context.DrawText(formattedText, new Point(_consoleTextSize.Width * item.Key.x, _consoleTextSize.Height * item.Key.y));
+        }
+    }
+
+    private sealed class TerminalPresenter : Control
+    {
+        private readonly TerminalControl _owner;
+
+        public TerminalPresenter(TerminalControl owner)
+        {
+            _owner = owner;
+        }
+
+        public override void Render(DrawingContext context)
+        {
+            _owner.RenderTerminal(context);
         }
     }
 }
