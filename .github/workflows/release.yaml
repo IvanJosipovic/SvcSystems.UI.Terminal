@@ -10,6 +10,13 @@ on:
     types: [opened, reopened, synchronize]
   merge_group:
 
+permissions:
+  id-token: write
+  contents: write
+  actions: write
+  checks: write
+  issues: write
+
 name: Create Release
 jobs:
   build:
@@ -29,7 +36,7 @@ jobs:
       run: dotnet build -c Release
 
     - name: Semantic Release
-      uses: cycjimmy/semantic-release-action@v4
+      uses: cycjimmy/semantic-release-action@v5
       id: semantic
       with:
         dry_run: true
@@ -43,14 +50,21 @@ jobs:
       working-directory: src/AvaloniaTerminal
       run: dotnet pack -c Release -p:Version=${{ (steps.semantic.outputs.new_release_published && steps.semantic.outputs.new_release_version) || '0.0.1' }}
 
+    - name: NuGet login (OIDC → temp API key)
+      if: steps.semantic.outputs.new_release_published == 'true'
+      uses: NuGet/login@v1
+      id: login
+      with:
+        user: IvanJosipovic
+
     - name: .NET NuGet Push
       if: steps.semantic.outputs.new_release_published == 'true'
       working-directory: src/AvaloniaTerminal/bin/Release
-      run: dotnet nuget push *.nupkg -s https://api.nuget.org/v3/index.json -k ${{ secrets.NUGET_API_KEY }}
+      run: dotnet nuget push *.nupkg -s https://api.nuget.org/v3/index.json -k ${{ steps.login.outputs.NUGET_API_KEY }}
 
     - name: Semantic Release
       if: steps.semantic.outputs.new_release_published == 'true'
-      uses: cycjimmy/semantic-release-action@v4
+      uses: cycjimmy/semantic-release-action@v5
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
