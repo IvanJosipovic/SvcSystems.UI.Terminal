@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.11.35327.3
+# Visual Studio Version 18
+VisualStudioVersion = 18.0.11123.170 d18.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AvaloniaTerminal.Desktop", "src\AvaloniaTerminal.Desktop\AvaloniaTerminal.Desktop.csproj", "{B55A5DC2-C1DF-4C7A-B799-4B05F1E88EFF}"
 EndProject
@@ -10,6 +10,7 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{3BFD487D-E975-46C9-8F37-2BE9321C4215}"
 	ProjectSection(SolutionItems) = preProject
 		.releaserc.json = .releaserc.json
+		global.json = global.json
 		README.md = README.md
 		.github\workflows\release.yaml = .github\workflows\release.yaml
 	EndProjectSection
