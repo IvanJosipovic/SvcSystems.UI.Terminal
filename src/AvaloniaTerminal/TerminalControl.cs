@@ -24,22 +24,22 @@ public partial class TerminalControl : Control
         CalculateTextSize();
     }
 
-    public static readonly StyledProperty<TerminalControlModel> TerminalProperty = AvaloniaProperty.Register<TerminalControl, TerminalControlModel>(nameof(Model));
+    public static readonly StyledProperty<TerminalControlModel> ModelProperty = AvaloniaProperty.Register<TerminalControl, TerminalControlModel>(nameof(Model));
 
     public TerminalControlModel Model
     {
-        get => GetValue(TerminalProperty);
-        set { SetValue(TerminalProperty, value);
+        get => GetValue(ModelProperty);
+        set { SetValue(ModelProperty, value);
             Model.UpdateUI = InvalidateVisual;
         }
     }
 
-    public static readonly StyledProperty<string> FontNameProperty = AvaloniaProperty.Register<TerminalControl, string>(nameof(FontName), "Cascadia Mono");
+    public static readonly StyledProperty<string> FontFamilyProperty = AvaloniaProperty.Register<TerminalControl, string>(nameof(FontFamily), "Cascadia Mono");
 
-    public string FontName
+    public string FontFamily
     {
-        get => GetValue(FontNameProperty);
-        set => SetValue(FontNameProperty, value);
+        get => GetValue(FontFamilyProperty);
+        set => SetValue(FontFamilyProperty, value);
     }
 
     public static readonly StyledProperty<double> FontSizeProperty = AvaloniaProperty.Register<TerminalControl, double>(nameof(FontSize), 12);
@@ -337,7 +337,7 @@ public partial class TerminalControl : Control
 
     private void CalculateTextSize()
     {
-        var myFont = FontFamily.Parse(FontName) ?? throw new ArgumentException($"The resource {FontName} is not a FontFamily.");
+        var myFont = Avalonia.Media.FontFamily.Parse(FontFamily) ?? throw new ArgumentException($"The resource {FontFamily} is not a FontFamily.");
 
         _typeface = new Typeface(myFont);
         var shaped = TextShaper.Current.ShapeText("a", new TextShaperOptions(_typeface.GlyphTypeface, FontSize));
