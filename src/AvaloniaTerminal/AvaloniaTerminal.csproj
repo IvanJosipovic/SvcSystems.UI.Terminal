@@ -27,7 +27,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\XtermSharp\XtermSharp.csproj" Pack="true">
+    <ProjectReference Include="..\XtermSharp\XtermSharp.csproj" Package="true">
     </ProjectReference>
   </ItemGroup>
 
@@ -37,7 +37,7 @@
 
   <Target Name="CopyProjectReferencesToPackage" DependsOnTargets="BuildOnlySettings;ResolveReferences">
     <ItemGroup>
-      <BuildOutputInPackage Include="@(ReferenceCopyLocalPaths->WithMetadataValue('ReferenceSourceTarget', 'ProjectReference')->WithMetadataValue('Pack', 'true'))" />
+      <BuildOutputInPackage Include="@(ReferenceCopyLocalPaths-&gt;WithMetadataValue('ReferenceSourceTarget', 'ProjectReference')-&gt;WithMetadataValue('Package', 'true'))" />
     </ItemGroup>
   </Target>
 
