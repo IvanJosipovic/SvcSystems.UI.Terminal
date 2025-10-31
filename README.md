@@ -6,4 +6,4 @@ Avalonia Terminal Control based on [XtermSharp](https://github.com/migueldeicaza
 
 ## Example
 
-![screenshot](https://github.com/IvanJosipovic/AvaloniaTerminal/blob/alpha/docs/Screenshot.png)
+![screenshot](https://raw.githubusercontent.com/IvanJosipovic/AvaloniaTerminal/refs/heads/alpha/docs/Screenshot.png)
