@@ -1,12 +1,13 @@
+using Avalonia;
 using Avalonia.Collections;
 using Avalonia.Media;
-using CommunityToolkit.Mvvm.ComponentModel;
+using PropertyGenerator.Avalonia;
 using System.Text;
 using XtermSharp;
 
 namespace AvaloniaTerminal;
 
-public partial class TerminalControlModel : ObservableObject, ITerminalDelegate
+public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
 {
     public TerminalControlModel()
     {
@@ -20,20 +21,20 @@ public partial class TerminalControlModel : ObservableObject, ITerminalDelegate
         UpdateDisplay();
     }
 
-    [ObservableProperty]
+    [GeneratedDirectProperty]
     public partial Terminal Terminal { get; set; }
 
-    [ObservableProperty]
+    [GeneratedDirectProperty]
     public partial SelectionService SelectionService { get; set; }
 
-    [ObservableProperty]
+    [GeneratedDirectProperty]
     public partial SearchService SearchService { get; set; }
 
-    [ObservableProperty]
+    [GeneratedDirectProperty]
     public partial string Title { get; set; }
 
-    [ObservableProperty]
-    public partial Dictionary<(int x, int y), TextObject> ConsoleText { get; set; } = new();
+    [GeneratedDirectProperty]
+    public partial Dictionary<(int x, int y), TextObject> ConsoleText { get; set; } = [];
 
     /// <summary>
     /// Gets or sets a value indicating whether this <see cref="T:AvaloniaTerminal.TerminalControl"/> treats the "Alt/Option" key on the mac keyboard as a meta key,
@@ -333,23 +334,23 @@ public partial class TerminalControlModel : ObservableObject, ITerminalDelegate
     }
 }
 
-public partial class TextObject : ObservableObject
+public partial class TextObject : AvaloniaObject
 {
-    [ObservableProperty]
+    [GeneratedStyledProperty]
     public partial IBrush Foreground { get; set; }
-    [ObservableProperty]
 
+    [GeneratedStyledProperty]
     public partial IBrush Background { get; set; }
-    [ObservableProperty]
 
+    [GeneratedStyledProperty]
     public partial string Text { get; set; }
-    [ObservableProperty]
 
+    [GeneratedStyledProperty]
     public partial FontWeight FontWeight { get; set; }
-    [ObservableProperty]
 
+    [GeneratedStyledProperty]
     public partial FontStyle FontStyle { get; set; }
-    [ObservableProperty]
 
+    [GeneratedStyledProperty]
     public partial TextDecorationCollection? TextDecorations { get; set; }
 }
