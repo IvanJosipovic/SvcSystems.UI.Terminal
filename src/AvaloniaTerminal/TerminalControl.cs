@@ -30,7 +30,8 @@ public partial class TerminalControl : Control
     {
         get => GetValue(ModelProperty);
         set { SetValue(ModelProperty, value);
-            Model.UpdateUI = InvalidateVisual;
+            if (Model != null)
+                Model.UpdateUI = InvalidateVisual;
         }
     }
 
