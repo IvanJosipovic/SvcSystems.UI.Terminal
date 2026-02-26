@@ -73,7 +73,7 @@ jobs:
           @semantic-release/changelog
           conventional-changelog-conventionalcommits
 
-    - uses: actions/upload-artifact@v5
+    - uses: actions/upload-artifact@v7
       with:
         name: NuGet Package
         path: src/**/*.nupkg
