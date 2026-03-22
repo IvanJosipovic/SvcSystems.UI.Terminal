@@ -18,6 +18,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\AvaloniaTerminal\AvaloniaTerminal.csproj" />
+    <ProjectReference Include="..\AvaloniaTerminal.Samples\AvaloniaTerminal.Samples.csproj" />
   </ItemGroup>
 </Project>

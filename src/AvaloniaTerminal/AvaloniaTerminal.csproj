@@ -27,6 +27,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>AvaloniaTerminal.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\XtermSharp\XtermSharp.csproj" Package="true" PrivateAssets="all">
     </ProjectReference>
   </ItemGroup>

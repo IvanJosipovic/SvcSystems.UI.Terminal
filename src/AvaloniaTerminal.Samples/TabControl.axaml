@@ -1,14 +1,17 @@
 <Window
-    x:Class="AvaloniaTerminal.Views.MainWindow"
+    x:Class="AvaloniaTerminal.Samples.TabControl"
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:samples="using:AvaloniaTerminal.Samples"
-    Title="AvaloniaTerminal Samples"
-    d:DesignHeight="240"
-    d:DesignWidth="480"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="Shell"
+    d:DesignHeight="200"
+    d:DesignWidth="400"
     mc:Ignorable="d">
+    <Window.Styles>
+        <StyleInclude Source="avares://AvaloniaTerminal/Styles/Colors.axaml" />
+    </Window.Styles>
     <TabControl>
         <TabItem Header="Shell">
             <samples:ShellControl />

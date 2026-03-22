@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\AvaloniaTerminal\AvaloniaTerminal.csproj" />
+    <ProjectReference Include="..\..\src\AvaloniaTerminal.Samples\AvaloniaTerminal.Samples.csproj" />
     <ProjectReference Include="..\..\src\XtermSharp\XtermSharp.csproj" />
   </ItemGroup>
 

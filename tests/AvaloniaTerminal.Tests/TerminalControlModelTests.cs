@@ -1,4 +1,5 @@
 using Avalonia.Media;
+using AvaloniaTerminal.Samples;
 using Xunit;
 
 namespace AvaloniaTerminal.Tests;
@@ -95,6 +96,91 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task CaretProperties_TrackCursorVisibilityAndPosition()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+
+            model.Feed("abc");
+
+            Assert.True(model.IsCaretVisible);
+            Assert.Equal(3, model.CaretColumn);
+            Assert.Equal(0, model.CaretRow);
+
+            model.Feed("\u001b[?25l");
+            Assert.False(model.IsCaretVisible);
+
+            model.Feed("\u001b[?25h");
+            Assert.True(model.IsCaretVisible);
+        });
+    }
+
+    [Fact]
+    public Task SelectionProperties_ReflectSelectionServiceText()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+            TerminalSamples.LoadSelectionSample(model);
+
+            model.SetSoftSelectionStart(0, 0);
+            model.StartSelectionFromSoftStart();
+            model.DragExtendSelection(0, 8);
+
+            Assert.True(model.HasSelection);
+            Assert.Equal("Avalonia", model.SelectedText);
+
+            model.ClearSelection();
+
+            Assert.False(model.HasSelection);
+            Assert.Equal(string.Empty, model.SelectedText);
+        });
+    }
+
+    [Fact]
+    public Task Search_SelectsMatchesAndNavigatesBetweenResults()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+            model.Resize(width: 320, height: 120, textWidth: 8, textHeight: 16);
+            model.Feed("alpha beta alpha gamma alpha");
+
+            var count = model.Search("alpha");
+
+            Assert.Equal(3, count);
+            Assert.Equal(3, model.SearchResultCount);
+            Assert.Equal("alpha", model.SelectedText);
+            Assert.Equal(0, model.CurrentSearchResultIndex);
+
+            var nextIndex = model.SelectNextSearchResult();
+            Assert.Equal(1, nextIndex);
+
+            var previousIndex = model.SelectPreviousSearchResult();
+            Assert.Equal(0, previousIndex);
+        });
+    }
+
+    [Fact]
+    public Task Send_EnsuresCaretIsVisibleWhenScrolledAway()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+            TerminalSamples.LoadScrollSample(model);
+
+            model.ScrollToYDisp(0);
+            Assert.Equal(0, model.ScrollOffset);
+
+            model.Send("x");
+
+            Assert.Equal(model.Terminal.Buffer.YBase, model.ScrollOffset);
+            Assert.True(model.IsCaretVisible);
+        });
+    }
+
+    [Fact]
     public Task ScrollProperties_ReflectScrollbackAndViewportMovement()
     {
         return RunInHeadlessSession(() =>
@@ -111,6 +197,29 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
             model.Terminal.ScrollLines(-1);
 
             Assert.InRange(model.ScrollPosition, 0d, 0.99d);
+        });
+    }
+
+    [Fact]
+    public Task Scrolling_KeepsRenderedCellCacheBoundedToViewport()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+            model.Resize(width: 320, height: 120, textWidth: 8, textHeight: 16);
+            TerminalSamples.LoadScrollSample(model);
+
+            var viewportCellCount = model.Terminal.Cols * model.Terminal.Rows;
+
+            Assert.Equal(viewportCellCount, model.ConsoleText.Count);
+
+            model.ScrollToYDisp(model.MaxScrollback / 2);
+
+            Assert.Equal(viewportCellCount, model.ConsoleText.Count);
+
+            model.ScrollToYDisp(model.MaxScrollback);
+
+            Assert.Equal(viewportCellCount, model.ConsoleText.Count);
         });
     }
 

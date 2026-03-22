@@ -15,9 +15,11 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
         Terminal = new Terminal(this);
         SelectionService = new SelectionService(Terminal);
         SearchService = new SearchService(Terminal);
+        SelectionService.SelectionChanged += HandleSelectionChanged;
 
         // trigger an update of the buffers
         FullBufferUpdate();
+        HandleSelectionChanged();
         UpdateDisplay();
     }
 
@@ -35,6 +37,21 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
 
     [GeneratedDirectProperty]
     public partial Dictionary<(int x, int y), TextObject> ConsoleText { get; set; } = [];
+
+    [GeneratedDirectProperty]
+    public partial string SelectedText { get; set; } = string.Empty;
+
+    [GeneratedDirectProperty]
+    public partial bool HasSelection { get; set; }
+
+    [GeneratedDirectProperty]
+    public partial string LastSearchText { get; set; } = string.Empty;
+
+    [GeneratedDirectProperty]
+    public partial int SearchResultCount { get; set; }
+
+    [GeneratedDirectProperty]
+    public partial int CurrentSearchResultIndex { get; set; } = -1;
 
     /// <summary>
     /// Gets or sets a value indicating whether this <see cref="T:AvaloniaTerminal.TerminalControl"/> treats the "Alt/Option" key on the mac keyboard as a meta key,
@@ -96,19 +113,57 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
     }
 
     /// <summary>
+    /// Gets the current scrollback offset.
+    /// </summary>
+    public int ScrollOffset => Terminal.Buffers.IsAlternateBuffer ? 0 : Terminal.Buffer.YDisp;
+
+    /// <summary>
+    /// Gets the maximum scrollback offset.
+    /// </summary>
+    public int MaxScrollback => Math.Max(Terminal.Buffer.Lines.Length - Terminal.Rows, 0);
+
+    /// <summary>
+    /// Gets the caret column within the viewport.
+    /// </summary>
+    public int CaretColumn => Math.Clamp(Terminal.Buffer.X, 0, Math.Max(Terminal.Cols - 1, 0));
+
+    /// <summary>
+    /// Gets the caret row within the viewport.
+    /// </summary>
+    public int CaretRow
+    {
+        get
+        {
+            var row = Terminal.Buffer.Y - Terminal.Buffer.YDisp + Terminal.Buffer.YBase;
+            return Math.Clamp(row, 0, Math.Max(Terminal.Rows - 1, 0));
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether the caret is visible in the current viewport.
+    /// </summary>
+    public bool IsCaretVisible => !Terminal.CursorHidden && Terminal.Buffer.IsCursorInViewport;
+
+    /// <summary>
+    /// Gets a value indicating whether terminal mouse reporting is active.
+    /// </summary>
+    public bool IsMouseModeActive => Terminal.MouseMode != MouseMode.Off;
+
+    /// <summary>
     ///  This event is raised when the terminal size (cols and rows, width, height) has change, due to a NSView frame changed.
     /// </summary>
-    public event Action<int, int, double, double> SizeChanged;
+    public event Action<int, int, double, double>? SizeChanged;
 
     /// <summary>
     /// Invoked to raise input on the control, which should probably be sent to the actual child process or remote connection
     /// </summary>
-    public event Action<byte[]> UserInput;
+    public event Action<byte[]>? UserInput;
 
-    public Action UpdateUI;
+    public Action? UpdateUI;
 
     public void ShowCursor(Terminal source)
     {
+        UpdateUI?.Invoke();
     }
 
     public void SetTerminalTitle(Terminal source, string title)
@@ -131,7 +186,7 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
 
     public void Send(byte[] data)
     {
-        //EnsureCaretIsVisible();
+        EnsureCaretIsVisible();
         UserInput?.Invoke(data);
     }
 
@@ -159,6 +214,7 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
 
         Terminal?.Resize(cols, rows);
         RemoveItemsDictionary();
+        UpdateDisplay();
 
         SizeChanged?.Invoke(cols, rows, width, height);
     }
@@ -180,47 +236,15 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
 
     public void FullBufferUpdate()
     {
-        for (var line = Terminal.Buffer.YBase; line < Terminal.Buffer.YBase + Terminal.Rows; line++)
-        {
-            for (var cell = 0; cell < Terminal.Cols; cell++)
-            {
-                var cd = Terminal.Buffer.Lines[line][cell];
-
-                var text = SetStyling(new TextObject(), cd);
-
-                text.Text = cd.Code == 0 ? " " : ((char)cd.Rune).ToString();
-                ConsoleText[(cell, line)] = text;
-            }
-        }
+        RebuildViewport();
     }
 
     public void UpdateDisplay()
     {
-        Terminal.GetUpdateRange(out var lineStart, out var lineEnd);
+        Terminal.GetUpdateRange(out _, out _);
         Terminal.ClearUpdateRange();
 
-        var tb = Terminal.Buffer;
-        for (int line = lineStart + tb.YDisp; line <= lineEnd + tb.YDisp; line++)
-        {
-            for (var cell = 0; cell < Terminal.Cols; cell++)
-            {
-                var cd = Terminal.Buffer.Lines[line][cell];
-
-                if (ConsoleText.TryGetValue((cell, line), out TextObject? text) && text != null)
-                {
-                    text = SetStyling(text, cd);
-
-                    text.Text = cd.Code == 0 ? " " : ((char)cd.Rune).ToString();
-                }
-                else
-                {
-                    var text2 = SetStyling(new TextObject(), cd);
-
-                    text2.Text = cd.Code == 0 ? " " : ((char)cd.Rune).ToString();
-                    ConsoleText[(cell, line - tb.YDisp)] = text2;
-                }
-            }
-        }
+        RebuildViewport();
 
         //UpdateCursorPosition();
         //UpdateScroller();
@@ -237,6 +261,288 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
         SearchService?.Invalidate();
         Terminal?.Feed(text, length);
         UpdateDisplay();
+    }
+
+    /// <summary>
+    /// Scrolls the terminal contents up by the given number of lines, up is negative and down is positive.
+    /// </summary>
+    public void ScrollLines(int lines)
+    {
+        Terminal.ScrollLines(lines);
+        UpdateDisplay();
+    }
+
+    /// <summary>
+    /// Scrolls the terminal contents so that the given row is at the top of the viewport.
+    /// </summary>
+    public void ScrollToYDisp(int ydisp)
+    {
+        ydisp = Math.Clamp(ydisp, 0, MaxScrollback);
+        var linesToScroll = ydisp - Terminal.Buffer.YDisp;
+        if (linesToScroll == 0)
+        {
+            return;
+        }
+
+        ScrollLines(linesToScroll);
+    }
+
+    /// <summary>
+    /// Scrolls the terminal contents to the relative position in the buffer.
+    /// </summary>
+    public void ScrollToPosition(double position)
+    {
+        var newScrollPosition = (int)(MaxScrollback * position);
+        ScrollToYDisp(newScrollPosition);
+    }
+
+    /// <summary>
+    /// Scrolls the viewport so the live caret is visible.
+    /// </summary>
+    public void EnsureCaretIsVisible()
+    {
+        ScrollToYDisp(Terminal.Buffer.YBase);
+    }
+
+    /// <summary>
+    /// Starts a selection drag from the given viewport row and column.
+    /// </summary>
+    public void StartSelection(int row, int col)
+    {
+        SelectionService.StartSelection(row, col);
+    }
+
+    /// <summary>
+    /// Starts a selection drag from the previously stored soft selection start.
+    /// </summary>
+    public void StartSelectionFromSoftStart()
+    {
+        SelectionService.StartSelection();
+    }
+
+    /// <summary>
+    /// Records a soft selection start without activating selection.
+    /// </summary>
+    public void SetSoftSelectionStart(int row, int col)
+    {
+        SelectionService.SetSoftStart(row, col);
+        HandleSelectionChanged();
+    }
+
+    /// <summary>
+    /// Extends the selection to the given viewport row and column.
+    /// </summary>
+    public void DragExtendSelection(int row, int col)
+    {
+        SelectionService.DragExtend(row, col);
+    }
+
+    /// <summary>
+    /// Extends the selection using shift-click semantics.
+    /// </summary>
+    public void ShiftExtendSelection(int row, int col)
+    {
+        SelectionService.ShiftExtend(row, col);
+    }
+
+    /// <summary>
+    /// Selects the word or expression at the given viewport row and column.
+    /// </summary>
+    public void SelectWordOrExpression(int row, int col)
+    {
+        SelectionService.SelectWordOrExpression(col, row);
+    }
+
+    /// <summary>
+    /// Selects the full row at the given viewport row.
+    /// </summary>
+    public void SelectRow(int row)
+    {
+        SelectionService.SelectRow(row);
+    }
+
+    /// <summary>
+    /// Selects the entire buffer.
+    /// </summary>
+    public void SelectAll()
+    {
+        SelectionService.SelectAll();
+    }
+
+    /// <summary>
+    /// Clears the current selection.
+    /// </summary>
+    public void ClearSelection()
+    {
+        SelectionService.SelectNone();
+    }
+
+    /// <summary>
+    /// Searches the buffer, selects the first result, and returns the total number of matches.
+    /// </summary>
+    public int Search(string text)
+    {
+        var snapshot = SearchService.GetSnapshot();
+        var result = snapshot.FindText(text);
+
+        LastSearchText = text;
+        SearchResultCount = result;
+        CurrentSearchResultIndex = -1;
+
+        if (result > 0)
+        {
+            SelectSearchResult(snapshot.FindNext(), snapshot);
+        }
+        else
+        {
+            ClearSelection();
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Selects the next search result and returns its index, or -1 when no search results exist.
+    /// </summary>
+    public int SelectNextSearchResult()
+    {
+        var snapshot = SearchService.GetSnapshot();
+        if (snapshot.LastSearchResults.Length == 0)
+        {
+            return -1;
+        }
+
+        SelectSearchResult(snapshot.FindNext(), snapshot);
+        return CurrentSearchResultIndex;
+    }
+
+    /// <summary>
+    /// Selects the previous search result and returns its index, or -1 when no search results exist.
+    /// </summary>
+    public int SelectPreviousSearchResult()
+    {
+        var snapshot = SearchService.GetSnapshot();
+        if (snapshot.LastSearchResults.Length == 0)
+        {
+            return -1;
+        }
+
+        SelectSearchResult(snapshot.FindPrevious(), snapshot);
+        return CurrentSearchResultIndex;
+    }
+
+    /// <summary>
+    /// Scrolls the terminal contents up by one page.
+    /// </summary>
+    public void PageUp()
+    {
+        ScrollLines(Terminal.Rows * -1);
+    }
+
+    /// <summary>
+    /// Scrolls the terminal contents down by one page.
+    /// </summary>
+    public void PageDown()
+    {
+        ScrollLines(Terminal.Rows);
+    }
+
+    /// <summary>
+    /// Converts a pointer wheel delta into terminal scroll lines.
+    /// </summary>
+    public void HandlePointerWheel(Vector delta)
+    {
+        if (delta.Y == 0)
+        {
+            return;
+        }
+
+        var velocity = CalculateScrollVelocity(Math.Abs(delta.Y));
+        ScrollLines(delta.Y > 0 ? velocity * -1 : velocity);
+    }
+
+    private int CalculateScrollVelocity(double delta)
+    {
+        if (delta > 9)
+        {
+            return Math.Max(Terminal.Rows, 20);
+        }
+
+        if (delta > 5)
+        {
+            return 10;
+        }
+
+        if (delta > 1)
+        {
+            return 3;
+        }
+
+        return 1;
+    }
+
+    private void HandleSelectionChanged()
+    {
+        var selectedText = SelectionService.Active ? SelectionService.GetSelectedText() : string.Empty;
+        SelectedText = selectedText;
+        HasSelection = SelectionService.Active && !string.IsNullOrEmpty(selectedText);
+        UpdateUI?.Invoke();
+    }
+
+    private void SelectSearchResult(SearchSnapshot.SearchResult? searchResult, SearchSnapshot snapshot)
+    {
+        ClearSelection();
+        if (searchResult == null)
+        {
+            CurrentSearchResultIndex = -1;
+            return;
+        }
+
+        SelectionService.SetSoftStart(searchResult.Start.Y - Terminal.Buffer.YDisp, searchResult.Start.X);
+        SelectionService.ShiftExtend(searchResult.End.Y - Terminal.Buffer.YDisp, searchResult.End.X);
+
+        CurrentSearchResultIndex = snapshot.CurrentSearchResult;
+
+        if ((searchResult.Start.Y < Terminal.Buffer.YDisp) || (searchResult.Start.Y >= Terminal.Buffer.YDisp + Terminal.Rows))
+        {
+            var newYDisp = Math.Max(searchResult.Start.Y - (Terminal.Rows / 2), 0);
+            ScrollToYDisp(newYDisp);
+        }
+        else
+        {
+            UpdateUI?.Invoke();
+        }
+    }
+
+    private void RebuildViewport()
+    {
+        var buffer = Terminal.Buffer;
+        var viewportRows = Math.Max(Terminal.Rows, 0);
+        var viewportCols = Math.Max(Terminal.Cols, 0);
+        var visibleStart = Math.Clamp(buffer.YDisp, 0, Math.Max(buffer.Lines.Length - 1, 0));
+
+        for (var row = 0; row < viewportRows; row++)
+        {
+            var bufferLine = visibleStart + row;
+
+            for (var cell = 0; cell < viewportCols; cell++)
+            {
+                var cd = bufferLine < buffer.Lines.Length
+                    ? buffer.GetChar(cell, bufferLine)
+                    : CharData.WhiteSpace;
+
+                if (!ConsoleText.TryGetValue((cell, row), out TextObject? text) || text == null)
+                {
+                    text = new TextObject();
+                    ConsoleText[(cell, row)] = text;
+                }
+
+                text = SetStyling(text, cd);
+                text.Text = cd.Code == 0 ? " " : ((char)cd.Rune).ToString();
+            }
+        }
+
+        RemoveItemsDictionary();
     }
 
     private static TextObject SetStyling(TextObject control, CharData cd)
