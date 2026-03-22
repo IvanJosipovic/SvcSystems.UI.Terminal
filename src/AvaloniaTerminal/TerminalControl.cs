@@ -1,6 +1,8 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
 using System.Globalization;
@@ -9,30 +11,57 @@ using Point = Avalonia.Point;
 
 namespace AvaloniaTerminal;
 
-public partial class TerminalControl : Control
+public partial class TerminalControl : Grid
 {
+    private const double ScrollBarWidth = 16;
+
     private Size _consoleTextSize;
 
     private Typeface _typeface;
+
+    private readonly TerminalSurface _surface;
+
+    private readonly ScrollBar _verticalScrollBar;
+
+    private bool _canRenderText;
+
+    private bool _isUpdatingScrollBar;
 
     public TerminalControl()
     {
         Focusable = true;
 
-        this.Focus(NavigationMethod.Pointer);
+        ColumnDefinitions =
+        [
+            new ColumnDefinition(1, GridUnitType.Star),
+            new ColumnDefinition(ScrollBarWidth, GridUnitType.Pixel),
+        ];
+
+        _surface = new TerminalSurface(this);
+        SetColumn(_surface, 0);
+        Children.Add(_surface);
+
+        _verticalScrollBar = new ScrollBar
+        {
+            Orientation = Orientation.Vertical,
+            SmallChange = 1,
+            Visibility = ScrollBarVisibility.Visible,
+            AllowAutoHide = false,
+        };
+        SetColumn(_verticalScrollBar, 1);
+        _verticalScrollBar.ValueChanged += OnVerticalScrollBarValueChanged;
+        Children.Add(_verticalScrollBar);
 
         CalculateTextSize();
+        UpdateScrollBar();
     }
 
-    public static readonly StyledProperty<TerminalControlModel> ModelProperty = AvaloniaProperty.Register<TerminalControl, TerminalControlModel>(nameof(Model));
+    public static readonly StyledProperty<TerminalControlModel?> ModelProperty = AvaloniaProperty.Register<TerminalControl, TerminalControlModel?>(nameof(Model));
 
-    public TerminalControlModel Model
+    public TerminalControlModel? Model
     {
         get => GetValue(ModelProperty);
-        set { SetValue(ModelProperty, value);
-            if (Model != null)
-                Model.UpdateUI = InvalidateVisual;
-        }
+        set => SetValue(ModelProperty, value);
     }
 
     public static readonly StyledProperty<string> FontFamilyProperty = AvaloniaProperty.Register<TerminalControl, string>(nameof(FontFamily), "Cascadia Mono");
@@ -49,6 +78,35 @@ public partial class TerminalControl : Control
     {
         get => GetValue(FontSizeProperty);
         set => SetValue(FontSizeProperty, value);
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+
+        if (change.Property == ModelProperty)
+        {
+            if (change.OldValue is TerminalControlModel oldModel && oldModel.UpdateUI == RefreshFromModel)
+            {
+                oldModel.UpdateUI = null;
+            }
+
+            if (change.NewValue is TerminalControlModel newModel)
+            {
+                newModel.UpdateUI = RefreshFromModel;
+            }
+
+            UpdateScrollBar();
+            ResizeModelToViewport();
+            _surface.InvalidateVisual();
+        }
+
+        if (change.Property == FontFamilyProperty || change.Property == FontSizeProperty)
+        {
+            CalculateTextSize();
+            ResizeModelToViewport();
+            _surface.InvalidateVisual();
+        }
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
@@ -249,7 +307,7 @@ public partial class TerminalControl : Control
                     }
                     else
                     {
-                        // TODO: view should scroll one page up.
+                        Model.PageUp();
                     }
                     break;
                 case Key.PageDown:
@@ -259,7 +317,7 @@ public partial class TerminalControl : Control
                     }
                     else
                     {
-                        // TODO: view should scroll one page down
+                        Model.PageDown();
                     }
                     break;
                 case Key.Home:
@@ -318,56 +376,150 @@ public partial class TerminalControl : Control
         e.Handled = true;
     }
 
-    protected override void OnSizeChanged(SizeChangedEventArgs e)
+    protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
-        base.OnSizeChanged(e);
+        base.OnPointerWheelChanged(e);
 
         if (Model == null)
         {
             return;
         }
 
-        Model.Resize(Bounds.Width, Bounds.Height, _consoleTextSize.Width, _consoleTextSize.Height);
-        InvalidateVisual();
+        Model.HandlePointerWheel(e.Delta);
+        e.Handled = true;
+    }
+
+    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    {
+        base.OnPointerPressed(e);
+        Focus(NavigationMethod.Pointer);
     }
 
     public static Brush ConvertXtermColor(int xtermColor)
     {
-        return Application.Current.FindResource("AvaloniaTerminalColor" + xtermColor) as SolidColorBrush;
+        return Application.Current?.FindResource("AvaloniaTerminalColor" + xtermColor) as Brush ?? new SolidColorBrush(Colors.Transparent);
     }
 
     private void CalculateTextSize()
     {
-        var myFont = Avalonia.Media.FontFamily.Parse(FontFamily) ?? throw new ArgumentException($"The resource {FontFamily} is not a FontFamily.");
+        try
+        {
+            var myFont = Avalonia.Media.FontFamily.Parse(FontFamily) ?? throw new ArgumentException($"The resource {FontFamily} is not a FontFamily.");
 
-        _typeface = new Typeface(myFont);
-        var shaped = TextShaper.Current.ShapeText("a", new TextShaperOptions(_typeface.GlyphTypeface, FontSize));
-        var run = new ShapedTextRun(shaped, new GenericTextRunProperties(_typeface, FontSize));
+            _typeface = new Typeface(myFont);
+            var shaped = TextShaper.Current.ShapeText("a", new TextShaperOptions(_typeface.GlyphTypeface, FontSize));
+            var run = new ShapedTextRun(shaped, new GenericTextRunProperties(_typeface, FontSize));
 
-        _consoleTextSize = run.Size;
+            _consoleTextSize = run.Size;
+            _canRenderText = true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
+        {
+            _typeface = new Typeface(Avalonia.Media.FontFamily.Default);
+            _consoleTextSize = new Size(Math.Max(FontSize * 0.6, 1), Math.Max(FontSize * 1.4, 1));
+            _canRenderText = false;
+        }
     }
 
-    public override void Render(DrawingContext context)
+    private void RefreshFromModel()
     {
-        var rect = new Rect(0,0, Bounds.Width, Bounds.Height);
-        context.FillRectangle(ConvertXtermColor(0), rect);
+        UpdateScrollBar();
+        _surface.InvalidateVisual();
+    }
 
+    private void ResizeModelToViewport()
+    {
         if (Model == null)
         {
             return;
         }
 
-        foreach (var item in Model.ConsoleText)
+        var viewport = _surface.Bounds;
+        Model.Resize(viewport.Width, viewport.Height, _consoleTextSize.Width, _consoleTextSize.Height);
+        UpdateScrollBar();
+    }
+
+    private void UpdateScrollBar()
+    {
+        _isUpdatingScrollBar = true;
+        try
         {
-            var rect2 = new Rect(_consoleTextSize.Width * item.Key.x, _consoleTextSize.Height * item.Key.y, _consoleTextSize.Width + 1, _consoleTextSize.Height + 1);
-            context.FillRectangle(item.Value.Background, rect2);
+            if (Model == null)
+            {
+                _verticalScrollBar.IsEnabled = false;
+                _verticalScrollBar.Minimum = 0;
+                _verticalScrollBar.Maximum = 0;
+                _verticalScrollBar.ViewportSize = 1;
+                _verticalScrollBar.LargeChange = 1;
+                _verticalScrollBar.Value = 0;
+                return;
+            }
 
-            var formattedText = new FormattedText(item.Value.Text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, _typeface, FontSize, item.Value.Foreground);
-            formattedText.SetTextDecorations(item.Value.TextDecorations);
-            formattedText.SetFontWeight(item.Value.FontWeight);
-            formattedText.SetFontStyle(item.Value.FontStyle);
+            _verticalScrollBar.IsEnabled = Model.CanScroll;
+            _verticalScrollBar.Minimum = 0;
+            _verticalScrollBar.Maximum = Model.MaxScrollback;
+            _verticalScrollBar.ViewportSize = Math.Max(Model.Terminal.Rows, 1);
+            _verticalScrollBar.SmallChange = 1;
+            _verticalScrollBar.LargeChange = Math.Max(Model.Terminal.Rows, 1);
+            _verticalScrollBar.Value = Model.ScrollOffset;
+        }
+        finally
+        {
+            _isUpdatingScrollBar = false;
+        }
+    }
 
-            context.DrawText(formattedText, new Point(_consoleTextSize.Width * item.Key.x, _consoleTextSize.Height * item.Key.y));
+    private void OnVerticalScrollBarValueChanged(object? sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (_isUpdatingScrollBar || Model == null)
+        {
+            return;
+        }
+
+        Model.ScrollToYDisp((int)Math.Round(e.NewValue));
+    }
+
+    private sealed class TerminalSurface(TerminalControl owner) : Control
+    {
+        public override void Render(DrawingContext context)
+        {
+            var rect = new Rect(0, 0, Bounds.Width, Bounds.Height);
+            context.FillRectangle(ConvertXtermColor(0), rect);
+
+            if (owner.Model == null)
+            {
+                return;
+            }
+
+            foreach (var item in owner.Model.ConsoleText)
+            {
+                var cellRect = new Rect(
+                    owner._consoleTextSize.Width * item.Key.x,
+                    owner._consoleTextSize.Height * item.Key.y,
+                    owner._consoleTextSize.Width + 1,
+                    owner._consoleTextSize.Height + 1);
+                context.FillRectangle(item.Value.Background, cellRect);
+
+                if (owner._canRenderText)
+                {
+                    var formattedText = new FormattedText(item.Value.Text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, owner._typeface, owner.FontSize, item.Value.Foreground);
+                    if (item.Value.TextDecorations != null)
+                    {
+                        formattedText.SetTextDecorations(item.Value.TextDecorations);
+                    }
+
+                    formattedText.SetFontWeight(item.Value.FontWeight);
+                    formattedText.SetFontStyle(item.Value.FontStyle);
+
+                    context.DrawText(formattedText, new Point(owner._consoleTextSize.Width * item.Key.x, owner._consoleTextSize.Height * item.Key.y));
+                }
+            }
+        }
+
+        protected override void OnSizeChanged(SizeChangedEventArgs e)
+        {
+            base.OnSizeChanged(e);
+            owner.ResizeModelToViewport();
         }
     }
 }

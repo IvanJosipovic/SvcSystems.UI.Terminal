@@ -96,16 +96,26 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
     }
 
     /// <summary>
+    /// Gets the current scrollback offset.
+    /// </summary>
+    public int ScrollOffset => Terminal.Buffers.IsAlternateBuffer ? 0 : Terminal.Buffer.YDisp;
+
+    /// <summary>
+    /// Gets the maximum scrollback offset.
+    /// </summary>
+    public int MaxScrollback => Math.Max(Terminal.Buffer.Lines.Length - Terminal.Rows, 0);
+
+    /// <summary>
     ///  This event is raised when the terminal size (cols and rows, width, height) has change, due to a NSView frame changed.
     /// </summary>
-    public event Action<int, int, double, double> SizeChanged;
+    public event Action<int, int, double, double>? SizeChanged;
 
     /// <summary>
     /// Invoked to raise input on the control, which should probably be sent to the actual child process or remote connection
     /// </summary>
-    public event Action<byte[]> UserInput;
+    public event Action<byte[]>? UserInput;
 
-    public Action UpdateUI;
+    public Action? UpdateUI;
 
     public void ShowCursor(Terminal source)
     {
@@ -159,6 +169,7 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
 
         Terminal?.Resize(cols, rows);
         RemoveItemsDictionary();
+        UpdateDisplay();
 
         SizeChanged?.Invoke(cols, rows, width, height);
     }
@@ -237,6 +248,89 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
         SearchService?.Invalidate();
         Terminal?.Feed(text, length);
         UpdateDisplay();
+    }
+
+    /// <summary>
+    /// Scrolls the terminal contents up by the given number of lines, up is negative and down is positive.
+    /// </summary>
+    public void ScrollLines(int lines)
+    {
+        Terminal.ScrollLines(lines);
+        UpdateDisplay();
+    }
+
+    /// <summary>
+    /// Scrolls the terminal contents so that the given row is at the top of the viewport.
+    /// </summary>
+    public void ScrollToYDisp(int ydisp)
+    {
+        ydisp = Math.Clamp(ydisp, 0, MaxScrollback);
+        var linesToScroll = ydisp - Terminal.Buffer.YDisp;
+        if (linesToScroll == 0)
+        {
+            return;
+        }
+
+        ScrollLines(linesToScroll);
+    }
+
+    /// <summary>
+    /// Scrolls the terminal contents to the relative position in the buffer.
+    /// </summary>
+    public void ScrollToPosition(double position)
+    {
+        var newScrollPosition = (int)(MaxScrollback * position);
+        ScrollToYDisp(newScrollPosition);
+    }
+
+    /// <summary>
+    /// Scrolls the terminal contents up by one page.
+    /// </summary>
+    public void PageUp()
+    {
+        ScrollLines(Terminal.Rows * -1);
+    }
+
+    /// <summary>
+    /// Scrolls the terminal contents down by one page.
+    /// </summary>
+    public void PageDown()
+    {
+        ScrollLines(Terminal.Rows);
+    }
+
+    /// <summary>
+    /// Converts a pointer wheel delta into terminal scroll lines.
+    /// </summary>
+    public void HandlePointerWheel(Vector delta)
+    {
+        if (delta.Y == 0)
+        {
+            return;
+        }
+
+        var velocity = CalculateScrollVelocity(Math.Abs(delta.Y));
+        ScrollLines(delta.Y > 0 ? velocity * -1 : velocity);
+    }
+
+    private int CalculateScrollVelocity(double delta)
+    {
+        if (delta > 9)
+        {
+            return Math.Max(Terminal.Rows, 20);
+        }
+
+        if (delta > 5)
+        {
+            return 10;
+        }
+
+        if (delta > 1)
+        {
+            return 3;
+        }
+
+        return 1;
     }
 
     private static TextObject SetStyling(TextObject control, CharData cd)
