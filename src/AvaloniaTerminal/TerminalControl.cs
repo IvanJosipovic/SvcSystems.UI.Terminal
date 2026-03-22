@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
@@ -24,6 +25,8 @@ public partial class TerminalControl : Grid
     private readonly ScrollBar _verticalScrollBar;
 
     private bool _canRenderText;
+
+    private bool _hasFocus;
 
     private bool _isUpdatingScrollBar;
 
@@ -78,6 +81,14 @@ public partial class TerminalControl : Grid
     {
         get => GetValue(FontSizeProperty);
         set => SetValue(FontSizeProperty, value);
+    }
+
+    public static readonly StyledProperty<IBrush?> CaretBrushProperty = AvaloniaProperty.Register<TerminalControl, IBrush?>(nameof(CaretBrush));
+
+    public IBrush? CaretBrush
+    {
+        get => GetValue(CaretBrushProperty);
+        set => SetValue(CaretBrushProperty, value);
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
@@ -395,6 +406,20 @@ public partial class TerminalControl : Grid
         Focus(NavigationMethod.Pointer);
     }
 
+    protected override void OnGotFocus(GotFocusEventArgs e)
+    {
+        base.OnGotFocus(e);
+        _hasFocus = true;
+        _surface.InvalidateVisual();
+    }
+
+    protected override void OnLostFocus(RoutedEventArgs e)
+    {
+        base.OnLostFocus(e);
+        _hasFocus = false;
+        _surface.InvalidateVisual();
+    }
+
     public static Brush ConvertXtermColor(int xtermColor)
     {
         return Application.Current?.FindResource("AvaloniaTerminalColor" + xtermColor) as Brush ?? new SolidColorBrush(Colors.Transparent);
@@ -425,6 +450,30 @@ public partial class TerminalControl : Grid
     {
         UpdateScrollBar();
         _surface.InvalidateVisual();
+    }
+
+    internal bool IsCaretFocused => _hasFocus;
+
+    internal bool HasVisibleCaret => TryGetCaretRect(out _);
+
+    internal Rect CaretRect => TryGetCaretRect(out var rect) ? rect : default;
+
+    private bool TryGetCaretRect(out Rect rect)
+    {
+        rect = default;
+
+        if (Model == null || !Model.IsCaretVisible || _consoleTextSize.Width <= 0 || _consoleTextSize.Height <= 0)
+        {
+            return false;
+        }
+
+        rect = new Rect(
+            Model.CaretColumn * _consoleTextSize.Width,
+            Model.CaretRow * _consoleTextSize.Height,
+            Math.Max(_consoleTextSize.Width, 1),
+            Math.Max(_consoleTextSize.Height, 1));
+
+        return true;
     }
 
     private void ResizeModelToViewport()
@@ -514,6 +563,31 @@ public partial class TerminalControl : Grid
                     context.DrawText(formattedText, new Point(owner._consoleTextSize.Width * item.Key.x, owner._consoleTextSize.Height * item.Key.y));
                 }
             }
+
+            if (!owner.TryGetCaretRect(out var caretRect))
+            {
+                return;
+            }
+
+            var caretBrush = owner.ResolveCaretBrush();
+            if (owner._hasFocus)
+            {
+                var fillRect = new Rect(
+                    caretRect.X - 1,
+                    caretRect.Y,
+                    caretRect.Width + 2,
+                    caretRect.Height);
+                context.FillRectangle(caretBrush, fillRect);
+            }
+            else
+            {
+                var strokeRect = new Rect(
+                    caretRect.X + 1,
+                    caretRect.Y + 1,
+                    Math.Max(caretRect.Width - 2, 1),
+                    Math.Max(caretRect.Height - 2, 1));
+                context.DrawRectangle(null, new Pen(caretBrush, 1), strokeRect);
+            }
         }
 
         protected override void OnSizeChanged(SizeChangedEventArgs e)
@@ -521,5 +595,48 @@ public partial class TerminalControl : Grid
             base.OnSizeChanged(e);
             owner.ResizeModelToViewport();
         }
+    }
+
+    private IBrush ResolveCaretBrush()
+    {
+        if (CaretBrush is not null)
+        {
+            return CaretBrush;
+        }
+
+        if (Model is not null &&
+            Model.ConsoleText.TryGetValue((Model.CaretColumn, Model.CaretRow), out var caretCell))
+        {
+            if (caretCell.Foreground is ISolidColorBrush foreground &&
+                caretCell.Background is ISolidColorBrush background)
+            {
+                return ColorsAreClose(foreground.Color, background.Color)
+                    ? CreateContrastingBrush(background.Color)
+                    : foreground;
+            }
+
+            if (caretCell.Foreground is not null)
+            {
+                return caretCell.Foreground;
+            }
+        }
+
+        return ConvertXtermColor(15);
+    }
+
+    private static bool ColorsAreClose(Avalonia.Media.Color left, Avalonia.Media.Color right)
+    {
+        var red = Math.Abs(left.R - right.R);
+        var green = Math.Abs(left.G - right.G);
+        var blue = Math.Abs(left.B - right.B);
+        return red + green + blue < 48;
+    }
+
+    private static SolidColorBrush CreateContrastingBrush(Avalonia.Media.Color background)
+    {
+        var luminance = (0.2126 * background.R) + (0.7152 * background.G) + (0.0722 * background.B);
+        return luminance > 128
+            ? new SolidColorBrush(Colors.Black)
+            : new SolidColorBrush(Colors.White);
     }
 }

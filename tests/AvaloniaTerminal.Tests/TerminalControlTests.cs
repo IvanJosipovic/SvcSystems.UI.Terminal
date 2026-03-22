@@ -28,6 +28,43 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task Caret_TracksViewportPosition()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+
+            model.Feed("abc");
+            var firstRect = control.CaretRect;
+
+            model.Feed("\r\nx");
+            var secondRect = control.CaretRect;
+
+            Assert.True(control.HasVisibleCaret);
+            Assert.True(firstRect.Width > 0);
+            Assert.True(firstRect.X > 0);
+            Assert.True(secondRect.Y > firstRect.Y);
+            Assert.True(secondRect.X < firstRect.X);
+        });
+    }
+
+    [Fact]
+    public Task Caret_HidesWhenViewportIsScrolledAwayFromCursor()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            PopulateScrollback(model);
+
+            Assert.True(control.HasVisibleCaret);
+
+            model.ScrollToYDisp(0);
+
+            Assert.False(control.HasVisibleCaret);
+        });
+    }
+
+    [Fact]
     public Task PointerWheel_RepeatedScrollingAcrossScrollSample_DoesNotThrowAndStaysInBounds()
     {
         return RunInHeadlessSession(() =>

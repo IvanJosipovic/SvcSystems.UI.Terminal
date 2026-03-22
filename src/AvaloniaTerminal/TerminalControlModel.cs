@@ -106,6 +106,28 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
     public int MaxScrollback => Math.Max(Terminal.Buffer.Lines.Length - Terminal.Rows, 0);
 
     /// <summary>
+    /// Gets the caret column within the viewport.
+    /// </summary>
+    public int CaretColumn => Math.Clamp(Terminal.Buffer.X, 0, Math.Max(Terminal.Cols - 1, 0));
+
+    /// <summary>
+    /// Gets the caret row within the viewport.
+    /// </summary>
+    public int CaretRow
+    {
+        get
+        {
+            var row = Terminal.Buffer.Y - Terminal.Buffer.YDisp + Terminal.Buffer.YBase;
+            return Math.Clamp(row, 0, Math.Max(Terminal.Rows - 1, 0));
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether the caret is visible in the current viewport.
+    /// </summary>
+    public bool IsCaretVisible => !Terminal.CursorHidden && Terminal.Buffer.IsCursorInViewport;
+
+    /// <summary>
     ///  This event is raised when the terminal size (cols and rows, width, height) has change, due to a NSView frame changed.
     /// </summary>
     public event Action<int, int, double, double>? SizeChanged;
@@ -119,6 +141,7 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
 
     public void ShowCursor(Terminal source)
     {
+        UpdateUI?.Invoke();
     }
 
     public void SetTerminalTitle(Terminal source, string title)
@@ -141,7 +164,7 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
 
     public void Send(byte[] data)
     {
-        //EnsureCaretIsVisible();
+        EnsureCaretIsVisible();
         UserInput?.Invoke(data);
     }
 
@@ -249,6 +272,14 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
     {
         var newScrollPosition = (int)(MaxScrollback * position);
         ScrollToYDisp(newScrollPosition);
+    }
+
+    /// <summary>
+    /// Scrolls the viewport so the live caret is visible.
+    /// </summary>
+    public void EnsureCaretIsVisible()
+    {
+        ScrollToYDisp(Terminal.Buffer.YBase);
     }
 
     /// <summary>

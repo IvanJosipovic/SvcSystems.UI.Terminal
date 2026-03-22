@@ -96,6 +96,45 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task CaretProperties_TrackCursorVisibilityAndPosition()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+
+            model.Feed("abc");
+
+            Assert.True(model.IsCaretVisible);
+            Assert.Equal(3, model.CaretColumn);
+            Assert.Equal(0, model.CaretRow);
+
+            model.Feed("\u001b[?25l");
+            Assert.False(model.IsCaretVisible);
+
+            model.Feed("\u001b[?25h");
+            Assert.True(model.IsCaretVisible);
+        });
+    }
+
+    [Fact]
+    public Task Send_EnsuresCaretIsVisibleWhenScrolledAway()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+            TerminalSamples.LoadScrollSample(model);
+
+            model.ScrollToYDisp(0);
+            Assert.Equal(0, model.ScrollOffset);
+
+            model.Send("x");
+
+            Assert.Equal(model.Terminal.Buffer.YBase, model.ScrollOffset);
+            Assert.True(model.IsCaretVisible);
+        });
+    }
+
+    [Fact]
     public Task ScrollProperties_ReflectScrollbackAndViewportMovement()
     {
         return RunInHeadlessSession(() =>
