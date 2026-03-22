@@ -145,6 +145,11 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
     public bool IsCaretVisible => !Terminal.CursorHidden && Terminal.Buffer.IsCursorInViewport;
 
     /// <summary>
+    /// Gets a value indicating whether terminal mouse reporting is active.
+    /// </summary>
+    public bool IsMouseModeActive => Terminal.MouseMode != MouseMode.Off;
+
+    /// <summary>
     ///  This event is raised when the terminal size (cols and rows, width, height) has change, due to a NSView frame changed.
     /// </summary>
     public event Action<int, int, double, double>? SizeChanged;

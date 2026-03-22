@@ -36,6 +36,10 @@ public partial class TerminalControl : Grid
 
     private int _selectionClickCount;
 
+    private bool _terminalMouseCaptured;
+
+    private int _activeTerminalMouseButton;
+
     private string _selectedText = string.Empty;
 
     private bool _hasSelection;
@@ -126,6 +130,8 @@ public partial class TerminalControl : Grid
         get => _hasSelection;
         private set => SetAndRaise(HasSelectionProperty, ref _hasSelection, value);
     }
+
+    public bool IsMouseModeActive => Model?.IsMouseModeActive ?? false;
 
     public void SelectAll()
     {
@@ -484,7 +490,18 @@ public partial class TerminalControl : Grid
         base.OnPointerPressed(e);
         Focus(NavigationMethod.Pointer);
 
-        if (Model == null || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        if (Model == null)
+        {
+            return;
+        }
+
+        if (TryHandleTerminalMousePressed(e))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
         {
             return;
         }
@@ -502,6 +519,12 @@ public partial class TerminalControl : Grid
     {
         base.OnPointerMoved(e);
 
+        if (TryHandleTerminalMouseMoved(e))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (!_selectionPointerCaptured || Model == null)
         {
             return;
@@ -516,6 +539,12 @@ public partial class TerminalControl : Grid
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
+
+        if (TryHandleTerminalMouseReleased(e))
+        {
+            e.Handled = true;
+            return;
+        }
 
         if (!_selectionPointerCaptured || Model == null)
         {
@@ -589,6 +618,11 @@ public partial class TerminalControl : Grid
         return new Point(
             (col * _consoleTextSize.Width) + (_consoleTextSize.Width / 2),
             (row * _consoleTextSize.Height) + (_consoleTextSize.Height / 2));
+    }
+
+    internal bool TryGetCellFromPointForTests(Point position, bool includeOutsideBounds, out int col, out int row)
+    {
+        return TryGetCellFromPoint(position, includeOutsideBounds, out col, out row);
     }
 
     internal bool HandleSelectionPressed(Point position, KeyModifiers modifiers, int clickCount)
@@ -706,6 +740,151 @@ public partial class TerminalControl : Grid
         return true;
     }
 
+    private bool TryHandleTerminalMousePressed(PointerPressedEventArgs e)
+    {
+        if (Model == null || !Model.IsMouseModeActive || !ShouldSendTerminalMousePress(Model.Terminal.MouseMode))
+        {
+            return false;
+        }
+
+        if (!TryGetCellFromPoint(e.GetPosition(_surface), includeOutsideBounds: true, out var col, out var row))
+        {
+            return false;
+        }
+
+        var button = GetPressedButton(e.GetCurrentPoint(_surface).Properties);
+        var buttonFlags = Model.Terminal.EncodeMouseButton(
+            button,
+            release: false,
+            shift: e.KeyModifiers.HasFlag(KeyModifiers.Shift),
+            meta: e.KeyModifiers.HasFlag(KeyModifiers.Alt),
+            control: e.KeyModifiers.HasFlag(KeyModifiers.Control));
+
+        _activeTerminalMouseButton = button;
+        _terminalMouseCaptured = true;
+        e.Pointer.Capture(_surface);
+
+        Model.Terminal.SendEvent(buttonFlags, col, row);
+        return true;
+    }
+
+    private bool TryHandleTerminalMouseMoved(PointerEventArgs e)
+    {
+        if (Model == null || !Model.IsMouseModeActive)
+        {
+            return false;
+        }
+
+        var mode = Model.Terminal.MouseMode;
+        var props = e.GetCurrentPoint(_surface).Properties;
+        var hasPressedButton = props.IsLeftButtonPressed || props.IsMiddleButtonPressed || props.IsRightButtonPressed;
+
+        var shouldSendMotion = mode.SendMotionEvent() || (mode.SendButtonTracking() && hasPressedButton);
+        if (!shouldSendMotion)
+        {
+            return false;
+        }
+
+        if (!TryGetCellFromPoint(e.GetPosition(_surface), includeOutsideBounds: true, out var col, out var row))
+        {
+            return false;
+        }
+
+        var button = hasPressedButton ? GetPressedButton(props) : _activeTerminalMouseButton;
+        var buttonFlags = Model.Terminal.EncodeMouseButton(
+            button,
+            release: false,
+            shift: e.KeyModifiers.HasFlag(KeyModifiers.Shift),
+            meta: e.KeyModifiers.HasFlag(KeyModifiers.Alt),
+            control: e.KeyModifiers.HasFlag(KeyModifiers.Control));
+
+        Model.Terminal.SendMouseMotion(buttonFlags, col, row);
+        return true;
+    }
+
+    private bool TryHandleTerminalMouseReleased(PointerReleasedEventArgs e)
+    {
+        if (Model == null || !_terminalMouseCaptured || !Model.IsMouseModeActive)
+        {
+            return false;
+        }
+
+        _terminalMouseCaptured = false;
+        e.Pointer.Capture(null);
+
+        if (!TryGetCellFromPoint(e.GetPosition(_surface), includeOutsideBounds: true, out var col, out var row))
+        {
+            return false;
+        }
+
+        if (!ShouldSendTerminalMouseRelease(Model.Terminal.MouseMode))
+        {
+            _activeTerminalMouseButton = 0;
+            return true;
+        }
+
+        var button = GetPointerButton(e);
+        var buttonFlags = Model.Terminal.EncodeMouseButton(
+            button,
+            release: true,
+            shift: e.KeyModifiers.HasFlag(KeyModifiers.Shift),
+            meta: e.KeyModifiers.HasFlag(KeyModifiers.Alt),
+            control: e.KeyModifiers.HasFlag(KeyModifiers.Control));
+
+        _activeTerminalMouseButton = 0;
+        Model.Terminal.SendEvent(buttonFlags, col, row);
+        return true;
+    }
+
+    private static bool ShouldSendTerminalMousePress(MouseMode mode)
+    {
+        return mode == MouseMode.X10 || mode == MouseMode.VT200 || mode == MouseMode.ButtonEventTracking || mode == MouseMode.AnyEvent;
+    }
+
+    private static bool ShouldSendTerminalMouseRelease(MouseMode mode)
+    {
+        return mode == MouseMode.VT200 || mode == MouseMode.ButtonEventTracking || mode == MouseMode.AnyEvent;
+    }
+
+    private static int GetPointerButton(PointerEventArgs e)
+    {
+        return e switch
+        {
+            PointerReleasedEventArgs released => MapMouseButton(released.InitialPressMouseButton),
+            _ => 0,
+        };
+    }
+
+    private static int GetPressedButton(PointerPointProperties properties)
+    {
+        if (properties.IsLeftButtonPressed)
+        {
+            return 0;
+        }
+
+        if (properties.IsMiddleButtonPressed)
+        {
+            return 1;
+        }
+
+        if (properties.IsRightButtonPressed)
+        {
+            return 2;
+        }
+
+        return 0;
+    }
+
+    private static int MapMouseButton(MouseButton button)
+    {
+        return button switch
+        {
+            MouseButton.Left => 0,
+            MouseButton.Middle => 1,
+            MouseButton.Right => 2,
+            _ => 0,
+        };
+    }
     private bool TryGetCellFromPoint(Point position, bool includeOutsideBounds, out int col, out int row)
     {
         col = 0;

@@ -140,6 +140,81 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task MouseMode_PointerPress_DoesNotStartSelection_AndSendsMouseEvent()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            TerminalSamples.LoadSelectionSample(model);
+            model.Feed("\u001b[?1006h\u001b[?1000h");
+
+            var sent = new List<byte[]>();
+            model.UserInput += bytes => sent.Add(bytes.ToArray());
+
+            control.SimulatePointerPressed(control.GetCellCenter(2, 0), clickCount: 1);
+
+            Assert.True(model.IsMouseModeActive);
+            Assert.False(model.HasSelection);
+            Assert.NotEmpty(sent);
+            Assert.Contains(sent.Select(Encoding.UTF8.GetString), text => text.Contains("<0;3;1M", StringComparison.Ordinal));
+        });
+    }
+
+    [Fact]
+    public Task MouseMode_PointerRelease_SendsReleaseEvent()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            model.Feed("\u001b[?1006h\u001b[?1000h");
+
+            var sent = new List<byte[]>();
+            model.UserInput += bytes => sent.Add(bytes.ToArray());
+
+            var point = control.GetCellCenter(1, 1);
+            control.SimulatePointerPressed(point, clickCount: 1);
+            control.SimulatePointerReleased(point);
+
+            Assert.Contains(sent.Select(Encoding.UTF8.GetString), text => text.Contains("<0;2;2m", StringComparison.Ordinal));
+        });
+    }
+
+    [Fact]
+    public Task MouseMode_PointerMove_SendsMotionEvent()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            model.Feed("\u001b[?1006h\u001b[?1003h");
+
+            var sent = new List<byte[]>();
+            model.UserInput += bytes => sent.Add(bytes.ToArray());
+
+            control.SimulatePointerPressed(control.GetCellCenter(0, 0), clickCount: 1);
+            control.SimulatePointerMoved(control.GetCellCenter(3, 1), isLeftButtonPressed: true);
+
+            Assert.Contains(sent.Select(Encoding.UTF8.GetString), text => text.Contains("<32;4;2M", StringComparison.Ordinal));
+        });
+    }
+
+    [Fact]
+    public Task PointerPosition_MapsToExpectedCellCoordinates()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out _, out _);
+
+            Assert.True(control.TryGetCellFromPointForTests(control.GetCellCenter(4, 2), includeOutsideBounds: true, out var col, out var row));
+            Assert.Equal(4, col);
+            Assert.Equal(2, row);
+
+            Assert.True(control.TryGetCellFromPointForTests(new Point(-20, -10), includeOutsideBounds: true, out col, out row));
+            Assert.Equal(0, col);
+            Assert.Equal(0, row);
+        });
+    }
+
+    [Fact]
     public Task PointerWheel_RepeatedScrollingAcrossScrollSample_DoesNotThrowAndStaysInBounds()
     {
         return RunInHeadlessSession(() =>
@@ -274,6 +349,31 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             var pointer = new Pointer(0, PointerType.Mouse, isPrimary: true);
             var args = new PointerWheelEventArgs(this, pointer, this, new Point(10, 10), 0, PointerPointProperties.None, KeyModifiers.None, delta);
             OnPointerWheelChanged(args);
+        }
+
+        public void SimulatePointerPressed(Point point, int clickCount, KeyModifiers modifiers = KeyModifiers.None)
+        {
+            var pointer = new Pointer(0, PointerType.Mouse, isPrimary: true);
+            var properties = new PointerPointProperties(RawInputModifiers.LeftMouseButton, PointerUpdateKind.LeftButtonPressed);
+            var args = new PointerPressedEventArgs(this, pointer, this, point, 0, properties, modifiers, clickCount);
+            OnPointerPressed(args);
+        }
+
+        public void SimulatePointerMoved(Point point, bool isLeftButtonPressed, KeyModifiers modifiers = KeyModifiers.None)
+        {
+            var pointer = new Pointer(0, PointerType.Mouse, isPrimary: true);
+            var rawModifiers = isLeftButtonPressed ? RawInputModifiers.LeftMouseButton : RawInputModifiers.None;
+            var properties = new PointerPointProperties(rawModifiers, PointerUpdateKind.Other);
+            var args = new PointerEventArgs(InputElement.PointerMovedEvent, this, pointer, this, point, 0, properties, modifiers);
+            OnPointerMoved(args);
+        }
+
+        public void SimulatePointerReleased(Point point, KeyModifiers modifiers = KeyModifiers.None)
+        {
+            var pointer = new Pointer(0, PointerType.Mouse, isPrimary: true);
+            var properties = new PointerPointProperties(RawInputModifiers.None, PointerUpdateKind.LeftButtonReleased);
+            var args = new PointerReleasedEventArgs(this, pointer, this, point, 0, properties, modifiers, MouseButton.Left);
+            OnPointerReleased(args);
         }
     }
 }
