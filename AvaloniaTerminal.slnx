@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".github/workflows/release.yaml" />
+    <File Path=".releaserc.json" />
+    <File Path="global.json" />
+    <File Path="README.md" />
+  </Folder>
+  <Project Path="src/AvaloniaTerminal.Desktop/AvaloniaTerminal.Desktop.csproj" />
+  <Project Path="src/AvaloniaTerminal/AvaloniaTerminal.csproj" />
+  <Project Path="src/XtermSharp/XtermSharp.csproj" />
+  <Project Path="tests/AvaloniaTerminal.Tests/AvaloniaTerminal.Tests.csproj" />
+</Solution>
