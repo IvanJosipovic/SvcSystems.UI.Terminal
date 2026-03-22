@@ -8,9 +8,7 @@ public partial class ShellControl : UserControl
 {
     private readonly TerminalControlModel _shellModel = new();
 
-    private Process? _process;
-
-    private CancellationTokenSource? _pumpCancellation;
+    private IShellSession? _session;
 
     public ShellControl()
     {
@@ -18,6 +16,7 @@ public partial class ShellControl : UserControl
 
         ShellTerminalControl.Model = _shellModel;
         _shellModel.UserInput += OnUserInput;
+        _shellModel.SizeChanged += OnTerminalSizeChanged;
 
         StartShell();
     }
@@ -25,40 +24,14 @@ public partial class ShellControl : UserControl
     private void StartShell()
     {
         var launch = ResolveShellLaunchConfiguration();
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = launch.FileName,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardInputEncoding = System.Text.Encoding.UTF8,
-            StandardOutputEncoding = System.Text.Encoding.UTF8,
-            StandardErrorEncoding = System.Text.Encoding.UTF8,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-
-        foreach (var argument in launch.Arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
-        startInfo.Environment["TERM"] = "xterm-256color";
-        startInfo.Environment["COLORTERM"] = "truecolor";
 
         try
         {
-            _process = new Process
-            {
-                StartInfo = startInfo,
-                EnableRaisingEvents = true,
-            };
-            _process.Exited += OnProcessExited;
-            _process.Start();
+            _session = CreateShellSession(launch);
+            _session.DataReceived += OnSessionDataReceived;
+            _session.Exited += OnSessionExited;
 
-            _pumpCancellation = new CancellationTokenSource();
-            _ = PumpOutputAsync(_process.StandardOutput.BaseStream, _pumpCancellation.Token);
-            _ = PumpOutputAsync(_process.StandardError.BaseStream, _pumpCancellation.Token);
+            _session.Resize(80, 25);
         }
         catch (Exception ex)
         {
@@ -66,66 +39,52 @@ public partial class ShellControl : UserControl
         }
     }
 
-    private async Task PumpOutputAsync(Stream stream, CancellationToken cancellationToken)
+    internal static IShellSession CreateShellSession(
+        ShellLaunchConfiguration launch,
+        bool? isWindowsOverride = null,
+        Func<ShellLaunchConfiguration, IShellSession>? redirectedFactory = null,
+        Func<ShellLaunchConfiguration, IShellSession>? conPtyFactory = null)
     {
-        byte[] buffer = new byte[4096];
+        redirectedFactory ??= static configuration => new RedirectedShellSession(configuration);
+        conPtyFactory ??= static configuration => new WindowsConPtyShellSession(configuration);
 
-        try
+        var isWindows = isWindowsOverride ?? OperatingSystem.IsWindows();
+        if (isWindows)
         {
-            while (!cancellationToken.IsCancellationRequested)
+            try
             {
-                int bytesRead = await stream.ReadAsync(buffer, cancellationToken);
-                if (bytesRead == 0)
-                {
-                    break;
-                }
-
-                byte[] chunk = buffer.AsSpan(0, bytesRead).ToArray();
-                await Dispatcher.UIThread.InvokeAsync(() => _shellModel.Feed(chunk, chunk.Length), DispatcherPriority.Background);
+                var conPtySession = conPtyFactory(launch);
+                conPtySession.Start();
+                return conPtySession;
+            }
+            catch (Exception ex) when (IsConPtyUnavailable(ex))
+            {
             }
         }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-        catch (IOException)
-        {
-        }
+
+        var redirectedSession = redirectedFactory(launch);
+        redirectedSession.Start();
+        return redirectedSession;
     }
 
     private void OnUserInput(byte[] input)
     {
-        try
-        {
-            var inputStream = _process?.StandardInput.BaseStream;
-            if (inputStream?.CanWrite != true)
-            {
-                return;
-            }
-
-            var normalizedInput = NormalizeStandardInput(input);
-            inputStream.Write(normalizedInput, 0, normalizedInput.Length);
-            inputStream.Flush();
-        }
-        catch (IOException)
-        {
-        }
-        catch (ObjectDisposedException)
-        {
-        }
+        _session?.Send(input);
     }
 
-    private void OnProcessExited(object? sender, EventArgs e)
+    private void OnSessionDataReceived(byte[] data)
     {
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (_process is not null)
-            {
-                _shellModel.Feed($"\r\n[Shell exited with code {_process.ExitCode}]\r\n");
-            }
-        });
+        _ = Dispatcher.UIThread.InvokeAsync(() => _shellModel.Feed(data, data.Length), DispatcherPriority.Background);
+    }
+
+    private void OnSessionExited(int exitCode)
+    {
+        Dispatcher.UIThread.Post(() => _shellModel.Feed($"\r\n[Shell exited with code {exitCode}]\r\n"));
+    }
+
+    private void OnTerminalSizeChanged(int cols, int rows, double width, double height)
+    {
+        _session?.Resize(cols, rows);
     }
 
     protected override void OnDetachedFromVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
@@ -137,34 +96,16 @@ public partial class ShellControl : UserControl
     private void StopShell()
     {
         _shellModel.UserInput -= OnUserInput;
+        _shellModel.SizeChanged -= OnTerminalSizeChanged;
 
-        if (_process is not null)
+        if (_session is not null)
         {
-            _process.Exited -= OnProcessExited;
+            _session.DataReceived -= OnSessionDataReceived;
+            _session.Exited -= OnSessionExited;
+            _session.Dispose();
         }
 
-        _pumpCancellation?.Cancel();
-        _pumpCancellation?.Dispose();
-        _pumpCancellation = null;
-
-        try
-        {
-            _process?.StandardInput.Close();
-        }
-        catch (IOException)
-        {
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-
-        if (_process is { HasExited: false })
-        {
-            _process.Kill(entireProcessTree: true);
-        }
-
-        _process?.Dispose();
-        _process = null;
+        _session = null;
     }
 
     internal static ShellLaunchConfiguration ResolveShellLaunchConfiguration(Func<string, bool>? executableExists = null)
@@ -295,6 +236,14 @@ public partial class ShellControl : UserControl
         }
 
         return null;
+    }
+
+    private static bool IsConPtyUnavailable(Exception ex)
+    {
+        return ex is PlatformNotSupportedException
+            or EntryPointNotFoundException
+            or DllNotFoundException
+            or InvalidOperationException;
     }
 }
 

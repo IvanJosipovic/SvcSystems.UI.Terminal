@@ -16,7 +16,7 @@
             CornerRadius="4">
             <StackPanel Spacing="4">
                 <TextBlock FontWeight="SemiBold" Text="Selected Text" />
-                <TextBlock Text="{Binding SelectedText}" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding SelectedText}" TextWrapping="Wrap" Height="55" />
             </StackPanel>
         </Border>
         <local:TerminalControl

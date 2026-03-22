@@ -557,6 +557,48 @@ public sealed class TerminalControlTests : AvaloniaTestBase
         Assert.Equal(Encoding.UTF8.GetBytes(Environment.NewLine), normalized);
     }
 
+    [Fact]
+    public void ShellSample_CreateShellSession_UsesRedirectedSessionOffWindows()
+    {
+        var redirected = new FakeShellSession();
+        var session = ShellControl.CreateShellSession(
+            new ShellLaunchConfiguration("sh", ["-i"], "sh"),
+            isWindowsOverride: false,
+            redirectedFactory: _ => redirected,
+            conPtyFactory: _ => throw new InvalidOperationException("ConPTY should not be created."));
+
+        Assert.Same(redirected, session);
+        Assert.True(redirected.Started);
+    }
+
+    [Fact]
+    public void ShellSample_CreateShellSession_UsesConPtyOnWindows()
+    {
+        var conPty = new FakeShellSession();
+        var session = ShellControl.CreateShellSession(
+            new ShellLaunchConfiguration("pwsh.exe", ["-NoLogo"], "pwsh.exe"),
+            isWindowsOverride: true,
+            redirectedFactory: _ => throw new InvalidOperationException("Redirected fallback should not be used."),
+            conPtyFactory: _ => conPty);
+
+        Assert.Same(conPty, session);
+        Assert.True(conPty.Started);
+    }
+
+    [Fact]
+    public void ShellSample_CreateShellSession_FallsBackWhenConPtyUnavailable()
+    {
+        var redirected = new FakeShellSession();
+        var session = ShellControl.CreateShellSession(
+            new ShellLaunchConfiguration("pwsh.exe", ["-NoLogo"], "pwsh.exe"),
+            isWindowsOverride: true,
+            redirectedFactory: _ => redirected,
+            conPtyFactory: _ => new ThrowingShellSession(new PlatformNotSupportedException("ConPTY unavailable")));
+
+        Assert.Same(redirected, session);
+        Assert.True(redirected.Started);
+    }
+
     private static TestableTerminalControl CreateControl(
         out TerminalControlModel model,
         out ScrollBar scrollBar)
@@ -638,6 +680,58 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             var properties = new PointerPointProperties(RawInputModifiers.None, updateKind);
             var args = new PointerReleasedEventArgs(this, pointer, this, point, 0, properties, modifiers, button);
             OnPointerReleased(args);
+        }
+    }
+
+    private sealed class FakeShellSession : IShellSession
+    {
+        public bool Started { get; private set; }
+
+        public event Action<byte[]>? DataReceived;
+
+        public event Action<int>? Exited;
+
+        public void Start()
+        {
+            Started = true;
+        }
+
+        public void Send(byte[] input)
+        {
+        }
+
+        public void Resize(int cols, int rows)
+        {
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class ThrowingShellSession(Exception exception) : IShellSession
+    {
+        private readonly Exception _exception = exception;
+
+        public event Action<byte[]>? DataReceived;
+
+        public event Action<int>? Exited;
+
+        public void Start()
+        {
+            throw _exception;
+        }
+
+        public void Send(byte[] input)
+        {
+        }
+
+        public void Resize(int cols, int rows)
+        {
+        }
+
+        public void Dispose()
+        {
         }
     }
 
