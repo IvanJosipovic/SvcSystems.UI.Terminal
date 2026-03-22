@@ -42,21 +42,42 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
     }
 
     [Fact]
-    public Task Resize_UsesFallbackSizeAndRemovesOutOfBoundsCells()
+    public Task Resize_IgnoresZeroSizedViewport()
     {
         return RunInHeadlessSession(() =>
         {
             var model = new TerminalControlModel();
             (int cols, int rows, double width, double height)? resize = null;
-            model.ConsoleText[(999, 999)] = new TextObject { Text = "x" };
             model.SizeChanged += (cols, rows, width, height) => resize = (cols, rows, width, height);
+            var originalCols = model.Terminal.Cols;
+            var originalRows = model.Terminal.Rows;
 
             model.Resize(width: 0, height: 0, textWidth: 8, textHeight: 16);
 
-            Assert.Equal((80, 30, 640d, 480d), resize);
-            Assert.Equal(80, model.Terminal.Cols);
-            Assert.Equal(30, model.Terminal.Rows);
-            Assert.DoesNotContain((999, 999), model.ConsoleText.Keys);
+            Assert.Null(resize);
+            Assert.Equal(originalCols, model.Terminal.Cols);
+            Assert.Equal(originalRows, model.Terminal.Rows);
+        });
+    }
+
+    [Fact]
+    public Task Resize_ClampsViewportToAtLeastOneCell()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+            (int cols, int rows, double width, double height)? resize = null;
+            model.SizeChanged += (cols, rows, width, height) => resize = (cols, rows, width, height);
+
+            model.Resize(width: 1, height: 1, textWidth: 8, textHeight: 16);
+
+            Assert.NotNull(resize);
+            Assert.Equal(1d, resize.Value.width);
+            Assert.Equal(1d, resize.Value.height);
+            Assert.True(resize.Value.cols >= 1);
+            Assert.True(resize.Value.rows >= 1);
+            Assert.True(model.Terminal.Cols >= 1);
+            Assert.True(model.Terminal.Rows >= 1);
         });
     }
 
@@ -92,6 +113,36 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
             model.Feed("\u001b]0;Avalonia Terminal\u0007");
 
             Assert.Equal("Avalonia Terminal", model.Title);
+        });
+    }
+
+    [Fact]
+    public Task Feed_NonBmpRune_RendersAsRenderSafeText()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+
+            model.Feed("😀");
+
+            var text = model.ConsoleText[(0, 0)].Text;
+            Assert.False(string.IsNullOrEmpty(text));
+            Assert.DoesNotContain(text, static ch => char.IsSurrogate(ch));
+        });
+    }
+
+    [Fact]
+    public Task Feed_BoxDrawingCharacter_UsesSingleCellWidthByDefault()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+
+            model.Feed("│A");
+
+            Assert.Equal("│", model.ConsoleText[(0, 0)].Text);
+            Assert.Equal("A", model.ConsoleText[(1, 0)].Text);
+            Assert.Equal(" ", model.ConsoleText[(2, 0)].Text);
         });
     }
 
@@ -237,6 +288,46 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
             Assert.False(model.CanScroll);
             Assert.Equal(0d, model.ScrollPosition);
             Assert.Equal(0f, model.ScrollThumbsize);
+        });
+    }
+
+    [Fact]
+    public Task Feed_CursorPrecedingLine_MovesUpRequestedNumberOfRows()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel(new XtermSharp.TerminalOptions
+            {
+                Cols = 10,
+                Rows = 4,
+            });
+
+            model.Feed("1111\r\n2222\r\n3333\r\n4444");
+            model.Feed("\u001b[1FZ");
+
+            Assert.Equal("Z", model.ConsoleText[(0, 2)].Text);
+            Assert.Equal("4", model.ConsoleText[(0, 3)].Text);
+        });
+    }
+
+    [Fact]
+    public Task Resize_WithReflowDisabled_PreservesBufferLineCount()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel(new XtermSharp.TerminalOptions
+            {
+                Cols = 10,
+                Rows = 4,
+                ReflowOnResize = false,
+            });
+
+            model.Feed("abcdefghij\r\nklmnopqrst\r\nuvwxyz");
+            var before = model.Terminal.Buffer.Lines.Length;
+
+            model.Resize(width: 160, height: 64, textWidth: 8, textHeight: 16);
+
+            Assert.Equal(before, model.Terminal.Buffer.Lines.Length);
         });
     }
 

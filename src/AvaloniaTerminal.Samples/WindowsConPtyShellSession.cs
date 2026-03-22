@@ -9,6 +9,7 @@ namespace AvaloniaTerminal.Samples;
 internal sealed class WindowsConPtyShellSession(ShellLaunchConfiguration launch) : IShellSession
 {
     private readonly ShellLaunchConfiguration _launch = launch;
+    private readonly object _syncRoot = new();
 
     private WindowsPseudoConsoleSafeHandle? _pseudoConsole;
 
@@ -23,6 +24,10 @@ internal sealed class WindowsConPtyShellSession(ShellLaunchConfiguration launch)
     private Process? _process;
 
     private CancellationTokenSource? _lifetimeCancellation;
+
+    private bool _isDisposed;
+
+    private (int cols, int rows)? _lastResize;
 
     public event Action<byte[]>? DataReceived;
 
@@ -111,23 +116,34 @@ internal sealed class WindowsConPtyShellSession(ShellLaunchConfiguration launch)
 
     public void Resize(int cols, int rows)
     {
-        if (!OperatingSystem.IsWindows() || _pseudoConsole is not { IsInvalid: false, IsClosed: false })
+        if (!TryBeginResize(cols, rows, out var pseudoConsoleHandle, out var normalized))
         {
             return;
         }
 
-        cols = Math.Max(cols, 1);
-        rows = Math.Max(rows, 1);
-
-        var result = NativeMethods.ResizePseudoConsole(_pseudoConsole.DangerousGetHandle(), new Coord((short)cols, (short)rows));
-        if (result != 0)
+        try
         {
-            Marshal.ThrowExceptionForHR(result);
+            var result = NativeMethods.ResizePseudoConsole(pseudoConsoleHandle, new Coord((short)normalized.cols, (short)normalized.rows));
+            if (result != 0)
+            {
+                Marshal.ThrowExceptionForHR(result);
+            }
+        }
+        catch (ExternalException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
         }
     }
 
     public void Dispose()
     {
+        lock (_syncRoot)
+        {
+            _isDisposed = true;
+        }
+
         _lifetimeCancellation?.Cancel();
         _lifetimeCancellation?.Dispose();
         _lifetimeCancellation = null;
@@ -164,6 +180,36 @@ internal sealed class WindowsConPtyShellSession(ShellLaunchConfiguration launch)
 
         _outputReadHandle?.Dispose();
         _outputReadHandle = null;
+    }
+
+    private bool TryBeginResize(int cols, int rows, out IntPtr pseudoConsoleHandle, out (int cols, int rows) normalized)
+    {
+        pseudoConsoleHandle = IntPtr.Zero;
+        normalized = (Math.Max(cols, 1), Math.Max(rows, 1));
+
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        lock (_syncRoot)
+        {
+            if (_isDisposed ||
+                _process is { HasExited: true } ||
+                _pseudoConsole is not { IsInvalid: false, IsClosed: false })
+            {
+                return false;
+            }
+
+            if (_lastResize == normalized)
+            {
+                return false;
+            }
+
+            _lastResize = normalized;
+            pseudoConsoleHandle = _pseudoConsole.DangerousGetHandle();
+            return true;
+        }
     }
 
     private void StartProcessAttachedToPseudoConsole(WindowsPseudoConsoleSafeHandle pseudoConsole)

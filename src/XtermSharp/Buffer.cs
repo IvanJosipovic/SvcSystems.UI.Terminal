@@ -203,7 +203,7 @@ namespace XtermSharp {
 				lines.Push (GetBlankLine (attr));
 		}
 
-		bool IsReflowEnabled => hasScrollback;// && Terminal.Options.WindowsMode;
+		bool IsReflowEnabled => hasScrollback && Terminal.Options.ReflowOnResize;
 
 		/// <summary>
 		/// Resize the buffer, adjusting its data accordingly

@@ -1134,7 +1134,6 @@ namespace XtermSharp {
 			int param = Math.Max (pars.Length > 0 ? pars [0] : 1, 1);
 			var buffer = terminal.Buffer;
 
-			buffer.Y -= param;
 			var newY = buffer.Y - param;
 			if (newY < 0)
 				buffer.Y = 0;
@@ -1245,16 +1244,16 @@ namespace XtermSharp {
 
 					// Now the challenge is that we have a character, not a rune, and we want to compute
 					// the width of it.
-					if (s.Length == 1) {
-						chWidth = RuneHelper.ConsoleWidth(s[0]);
-					}
-					else {
-						chWidth = 0;
-
-						foreach (var scalar in s) {
-							chWidth = Math.Max(chWidth, RuneHelper.ConsoleWidth(scalar));
+						if (s.Length == 1) {
+							chWidth = RuneHelper.ConsoleWidth(s[0]);
 						}
-					}
+						else {
+							chWidth = 0;
+
+							foreach (var scalar in s) {
+								chWidth = Math.Max(chWidth, RuneHelper.ConsoleWidth(scalar));
+							}
+						}
 
 				}
 				else {

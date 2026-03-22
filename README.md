@@ -13,13 +13,14 @@ Avalonia terminal control built on top of [XtermSharp](https://github.com/miguel
 - Caret rendering with theme-aware default styling
 - Text selection with drag, double-click word selection, triple-click row selection, and drag auto-scroll
 - Bindable selection state via `SelectedText` and `HasSelection`
-- Mouse reporting mode support for terminal apps such as `vim`, `less`, and `tmux`
 - Search helpers for finding and navigating matches in the terminal buffer
-- Host-friendly context and clipboard hooks
+- Mouse reporting mode support for xterm-compatible terminal apps
+- Host-friendly context menu and clipboard hooks
 - Configurable right-click behavior via `RightClickAction`
 - Model-driven API for feeding terminal output and sending user input
 - Sample desktop app with `Shell`, `Scroll`, and `Selection` tabs
 - Windows sample shell backed by ConPTY, with redirected-shell fallback when ConPTY is unavailable
+- Sample shell disables resize reflow to avoid TUI resize corruption in apps such as `mc`
 
 ## Install
 
@@ -57,6 +58,17 @@ public partial class MainWindow : Window
         TerminalView.Model = _terminal;
     }
 }
+```
+
+You can also pass `XtermSharp.TerminalOptions` when you need non-default terminal behavior:
+
+```csharp
+using XtermSharp;
+
+var model = new TerminalControlModel(new TerminalOptions
+{
+    ReflowOnResize = false,
+});
 ```
 
 Feed terminal output:
@@ -122,13 +134,18 @@ _ = Task.Run(async () =>
 - `SelectAll()`, `ClearSelection()`
 - `SelectedText`, `HasSelection`
 - `ScrollOffset`, `MaxScrollback`
+- `CaretColumn`, `CaretRow`, `IsCaretVisible`
 - `IsMouseModeActive`
+- `SizeChanged`
+- `Terminal`, `SelectionService`, `SearchService`
 
 `TerminalControl`:
 
 - `Model`
 - `SelectedText`, `HasSelection`
 - `RightClickAction`
+- `IsMouseModeActive`
+- `FontFamily`, `FontSize`, `CaretBrush`, `SelectionBrush`
 - `SelectAll()`
 - `CopySelection()`
 - `CopySelectionAsync()`
@@ -138,6 +155,14 @@ _ = Task.Run(async () =>
 - `SelectNextSearchResult()`
 - `SelectPreviousSearchResult()`
 - `ContextRequested`
+
+`XtermSharp.TerminalOptions` used by `TerminalControlModel`:
+
+- `Scrollback`
+- `ConvertEol`
+- `TabStopWidth`
+- `TermName`
+- `ReflowOnResize`
 
 ## Selection And Context Menus
 
@@ -178,6 +203,12 @@ await TerminalView.CopySelectionAsync();
 await TerminalView.PasteFromClipboardAsync();
 ```
 
+`ContextRequested` carries:
+
+- pointer position relative to the control
+- current `SelectedText`
+- current `HasSelection`
+
 ## Search
 
 Search is buffer-based
@@ -200,6 +231,8 @@ Useful model properties:
 ## Mouse Reporting
 
 When the terminal application enables mouse reporting, `TerminalControl` forwards pointer press, release, and motion events to `XtermSharp` instead of using them for text selection. This allows interactive terminal applications to receive mouse input.
+
+This is controlled by the terminal app, not by the Avalonia host. If an app does not switch the terminal into xterm mouse mode, the control will keep using the pointer for normal text selection.
 
 ## Styling
 
@@ -231,6 +264,8 @@ Current sample tabs:
 - `Shell`: starts a platform-appropriate shell
   - Windows: prefers ConPTY-backed `pwsh.exe`, with redirected fallback
   - macOS/Linux: uses the existing redirected-shell sample backend
+  - uses `RightClickAction="CopyOrPaste"`
+  - constructs the model with `ReflowOnResize = false` to keep full-screen TUIs stable during window resize
 - `Scroll`: preloaded scrollback sample
 - `Selection`: demonstrates selection and bindable selected text
 
@@ -249,6 +284,12 @@ Shared sample controls:
 ```bash
 dotnet run --project src/AvaloniaTerminal.Desktop
 ```
+
+### Sample shell notes
+
+- On Windows, the sample uses ConPTY when available.
+- Full-screen TUIs such as `mc` render correctly with the current ambiguous-width fix and with resize reflow disabled in the sample shell.
+- Mouse interaction in TUIs still depends on the application enabling xterm mouse reporting. Remote Linux apps often do this; some local Windows console apps may not.
 
 ## Testing
 
