@@ -1,5 +1,4 @@
 using Avalonia.Controls;
-using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
 using System.Diagnostics;
 
@@ -22,12 +21,6 @@ public partial class PowerShellControl : UserControl
 
         StartPowerShellCore();
     }
-
-    private void InitializeComponent()
-    {
-        AvaloniaXamlLoader.Load(this);
-    }
-
     private void StartPowerShellCore()
     {
         var startInfo = new ProcessStartInfo

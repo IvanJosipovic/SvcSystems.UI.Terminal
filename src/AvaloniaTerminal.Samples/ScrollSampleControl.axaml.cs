@@ -1,5 +1,4 @@
 using Avalonia.Controls;
-using Avalonia.Markup.Xaml;
 
 namespace AvaloniaTerminal.Samples;
 
@@ -11,10 +10,5 @@ public partial class ScrollSampleControl : UserControl
     {
         InitializeComponent();
         ScrollTerminalControl.Model = _scrollSampleModel;
-    }
-
-    private void InitializeComponent()
-    {
-        AvaloniaXamlLoader.Load(this);
     }
 }
