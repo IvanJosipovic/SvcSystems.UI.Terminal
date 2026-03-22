@@ -11,11 +11,15 @@ Avalonia terminal control built on top of [XtermSharp](https://github.com/miguel
 - Terminal rendering backed by `XtermSharp`
 - Scrollback with mouse wheel, scrollbar, `PageUp`, and `PageDown`
 - Caret rendering with theme-aware default styling
-- Text selection with drag, double-click word selection, and triple-click row selection
+- Text selection with drag, double-click word selection, triple-click row selection, and drag auto-scroll
 - Bindable selection state via `SelectedText` and `HasSelection`
+- Mouse reporting mode support for terminal apps such as `vim`, `less`, and `tmux`
 - Search helpers for finding and navigating matches in the terminal buffer
+- Host-friendly context and clipboard hooks
+- Configurable right-click behavior via `RightClickAction`
 - Model-driven API for feeding terminal output and sending user input
 - Sample desktop app with `Shell`, `Scroll`, and `Selection` tabs
+- Windows sample shell backed by ConPTY, with redirected-shell fallback when ConPTY is unavailable
 
 ## Install
 
@@ -79,7 +83,7 @@ The usual flow is:
 3. Forward terminal output into `model.Feed(...)`
 4. Forward `model.UserInput` to your process or remote shell
 
-Example with a local process using redirected streams:
+Example with a local process or remote session:
 
 ```csharp
 var model = new TerminalControlModel();
@@ -117,17 +121,23 @@ _ = Task.Run(async () =>
 - `Search(string)`, `SelectNextSearchResult()`, `SelectPreviousSearchResult()`
 - `SelectAll()`, `ClearSelection()`
 - `SelectedText`, `HasSelection`
+- `ScrollOffset`, `MaxScrollback`
+- `IsMouseModeActive`
 
 `TerminalControl`:
 
 - `Model`
 - `SelectedText`, `HasSelection`
+- `RightClickAction`
 - `SelectAll()`
 - `CopySelection()`
+- `CopySelectionAsync()`
 - `Paste(string)`
+- `PasteFromClipboardAsync()`
 - `Search(string)`
 - `SelectNextSearchResult()`
 - `SelectPreviousSearchResult()`
+- `ContextRequested`
 
 ## Selection And Context Menus
 
@@ -140,13 +150,33 @@ if (TerminalView.HasSelection)
 }
 ```
 
-You can also bind against `SelectedText` and `HasSelection` from the control or the model.
+You can also bind against `SelectedText` and `HasSelection` from the control or the model, or handle `ContextRequested` for a custom menu.
 
 Selection behavior:
 
 - drag selects text
 - double-click selects a word or expression
 - triple-click selects a full row
+- dragging above or below the viewport auto-scrolls and keeps extending the selection
+
+Right-click behavior is configurable:
+
+- `ContextMenu`: raise `ContextRequested`
+- `CopyOrPaste`: copy when selection exists, otherwise paste from the clipboard
+- `None`: ignore right-click
+
+Example:
+
+```xml
+<terminal:TerminalControl RightClickAction="CopyOrPaste" />
+```
+
+Programmatic clipboard helpers:
+
+```csharp
+await TerminalView.CopySelectionAsync();
+await TerminalView.PasteFromClipboardAsync();
+```
 
 ## Search
 
@@ -166,6 +196,10 @@ Useful model properties:
 - `SearchResultCount`
 - `CurrentSearchResultIndex`
 - `LastSearchText`
+
+## Mouse Reporting
+
+When the terminal application enables mouse reporting, `TerminalControl` forwards pointer press, release, and motion events to `XtermSharp` instead of using them for text selection. This allows interactive terminal applications to receive mouse input.
 
 ## Styling
 
@@ -195,6 +229,8 @@ The repo includes a shared samples project and a desktop sample host.
 Current sample tabs:
 
 - `Shell`: starts a platform-appropriate shell
+  - Windows: prefers ConPTY-backed `pwsh.exe`, with redirected fallback
+  - macOS/Linux: uses the existing redirected-shell sample backend
 - `Scroll`: preloaded scrollback sample
 - `Selection`: demonstrates selection and bindable selected text
 
