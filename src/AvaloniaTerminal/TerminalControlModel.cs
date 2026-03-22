@@ -191,47 +191,15 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
 
     public void FullBufferUpdate()
     {
-        for (var line = Terminal.Buffer.YBase; line < Terminal.Buffer.YBase + Terminal.Rows; line++)
-        {
-            for (var cell = 0; cell < Terminal.Cols; cell++)
-            {
-                var cd = Terminal.Buffer.Lines[line][cell];
-
-                var text = SetStyling(new TextObject(), cd);
-
-                text.Text = cd.Code == 0 ? " " : ((char)cd.Rune).ToString();
-                ConsoleText[(cell, line)] = text;
-            }
-        }
+        RebuildViewport();
     }
 
     public void UpdateDisplay()
     {
-        Terminal.GetUpdateRange(out var lineStart, out var lineEnd);
+        Terminal.GetUpdateRange(out _, out _);
         Terminal.ClearUpdateRange();
 
-        var tb = Terminal.Buffer;
-        for (int line = lineStart + tb.YDisp; line <= lineEnd + tb.YDisp; line++)
-        {
-            for (var cell = 0; cell < Terminal.Cols; cell++)
-            {
-                var cd = Terminal.Buffer.Lines[line][cell];
-
-                if (ConsoleText.TryGetValue((cell, line), out TextObject? text) && text != null)
-                {
-                    text = SetStyling(text, cd);
-
-                    text.Text = cd.Code == 0 ? " " : ((char)cd.Rune).ToString();
-                }
-                else
-                {
-                    var text2 = SetStyling(new TextObject(), cd);
-
-                    text2.Text = cd.Code == 0 ? " " : ((char)cd.Rune).ToString();
-                    ConsoleText[(cell, line - tb.YDisp)] = text2;
-                }
-            }
-        }
+        RebuildViewport();
 
         //UpdateCursorPosition();
         //UpdateScroller();
@@ -331,6 +299,37 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
         }
 
         return 1;
+    }
+
+    private void RebuildViewport()
+    {
+        var buffer = Terminal.Buffer;
+        var viewportRows = Math.Max(Terminal.Rows, 0);
+        var viewportCols = Math.Max(Terminal.Cols, 0);
+        var visibleStart = Math.Clamp(buffer.YDisp, 0, Math.Max(buffer.Lines.Length - 1, 0));
+
+        for (var row = 0; row < viewportRows; row++)
+        {
+            var bufferLine = visibleStart + row;
+
+            for (var cell = 0; cell < viewportCols; cell++)
+            {
+                var cd = bufferLine < buffer.Lines.Length
+                    ? buffer.GetChar(cell, bufferLine)
+                    : CharData.WhiteSpace;
+
+                if (!ConsoleText.TryGetValue((cell, row), out TextObject? text) || text == null)
+                {
+                    text = new TextObject();
+                    ConsoleText[(cell, row)] = text;
+                }
+
+                text = SetStyling(text, cd);
+                text.Text = cd.Code == 0 ? " " : ((char)cd.Rune).ToString();
+            }
+        }
+
+        RemoveItemsDictionary();
     }
 
     private static TextObject SetStyling(TextObject control, CharData cd)

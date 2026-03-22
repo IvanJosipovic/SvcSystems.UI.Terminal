@@ -1,4 +1,5 @@
 using Avalonia.Media;
+using AvaloniaTerminal.Samples;
 using Xunit;
 
 namespace AvaloniaTerminal.Tests;
@@ -111,6 +112,29 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
             model.Terminal.ScrollLines(-1);
 
             Assert.InRange(model.ScrollPosition, 0d, 0.99d);
+        });
+    }
+
+    [Fact]
+    public Task Scrolling_KeepsRenderedCellCacheBoundedToViewport()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+            model.Resize(width: 320, height: 120, textWidth: 8, textHeight: 16);
+            TerminalSamples.LoadScrollSample(model);
+
+            var viewportCellCount = model.Terminal.Cols * model.Terminal.Rows;
+
+            Assert.Equal(viewportCellCount, model.ConsoleText.Count);
+
+            model.ScrollToYDisp(model.MaxScrollback / 2);
+
+            Assert.Equal(viewportCellCount, model.ConsoleText.Count);
+
+            model.ScrollToYDisp(model.MaxScrollback);
+
+            Assert.Equal(viewportCellCount, model.ConsoleText.Count);
         });
     }
 

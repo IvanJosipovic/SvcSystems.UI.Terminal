@@ -28,6 +28,34 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task PointerWheel_RepeatedScrollingAcrossScrollSample_DoesNotThrowAndStaysInBounds()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out var scrollBar);
+            PopulateScrollback(model);
+
+            var maxScrollback = model.MaxScrollback;
+
+            for (var i = 0; i < maxScrollback + 10; i++)
+            {
+                control.SimulatePointerWheel(new Vector(0, 1));
+            }
+
+            Assert.Equal(0, model.ScrollOffset);
+            Assert.Equal(0, (int)scrollBar.Value);
+
+            for (var i = 0; i < maxScrollback + 10; i++)
+            {
+                control.SimulatePointerWheel(new Vector(0, -1));
+            }
+
+            Assert.Equal(maxScrollback, model.ScrollOffset);
+            Assert.Equal(maxScrollback, (int)scrollBar.Value);
+        });
+    }
+
+    [Fact]
     public Task ScrollBar_ValueChangeScrollsTerminalViewport()
     {
         return RunInHeadlessSession(() =>
