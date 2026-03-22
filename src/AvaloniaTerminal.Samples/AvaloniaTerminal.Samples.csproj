@@ -9,6 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="AvaloniaTerminal.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.12" />
     <ProjectReference Include="..\AvaloniaTerminal\AvaloniaTerminal.csproj" />
   </ItemGroup>

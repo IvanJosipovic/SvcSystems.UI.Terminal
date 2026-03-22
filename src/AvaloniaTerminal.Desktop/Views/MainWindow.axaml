@@ -10,8 +10,8 @@
     d:DesignWidth="480"
     mc:Ignorable="d">
     <TabControl>
-        <TabItem Header="PowerShell">
-            <samples:PowerShellControl />
+        <TabItem Header="Shell">
+            <samples:ShellControl />
         </TabItem>
         <TabItem Header="Scroll">
             <samples:ScrollSampleControl />

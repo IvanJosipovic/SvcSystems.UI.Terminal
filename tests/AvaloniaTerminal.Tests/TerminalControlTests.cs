@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using AvaloniaTerminal.Samples;
+using System.Text;
 using Xunit;
 
 namespace AvaloniaTerminal.Tests;
@@ -145,6 +146,14 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             Assert.Equal(Math.Min(model.MaxScrollback, before + model.Terminal.Rows), model.ScrollOffset);
             Assert.Equal(model.ScrollOffset, (int)scrollBar.Value);
         });
+    }
+
+    [Fact]
+    public void ShellSample_NormalizesTerminalEnterForRedirectedInput()
+    {
+        var normalized = ShellControl.NormalizeStandardInput([0x0D]);
+
+        Assert.Equal(Encoding.UTF8.GetBytes(Environment.NewLine), normalized);
     }
 
     private static TestableTerminalControl CreateControl(

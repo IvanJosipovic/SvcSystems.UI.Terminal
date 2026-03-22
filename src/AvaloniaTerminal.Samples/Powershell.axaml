@@ -5,7 +5,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:samples="using:AvaloniaTerminal.Samples"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    Title="PowerShell"
+    Title="Shell"
     d:DesignHeight="200"
     d:DesignWidth="400"
     mc:Ignorable="d">
@@ -13,8 +13,8 @@
         <StyleInclude Source="avares://AvaloniaTerminal/Styles/Colors.axaml" />
     </Window.Styles>
     <TabControl>
-        <TabItem Header="PowerShell">
-            <samples:PowerShellControl />
+        <TabItem Header="Shell">
+            <samples:ShellControl />
         </TabItem>
         <TabItem Header="Scroll">
             <samples:ScrollSampleControl />
