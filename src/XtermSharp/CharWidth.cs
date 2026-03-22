@@ -156,9 +156,6 @@ namespace XtermSharp {
 			if (bisearch (rune, combining, combining.GetLength (0) - 1) != 0)
 				return 0;
 
-			if (bisearch(rune, ambiguous, ambiguous.GetLength(0) - 1) != 0)
-				return 2;
-
 			/* if we arrive here, ucs is not a combining or C0/C1 control character */
 			return 1 +
 				((rune >= 0x1100 &&

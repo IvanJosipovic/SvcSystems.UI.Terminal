@@ -1,12 +1,17 @@
 using Avalonia.Controls;
 using Avalonia.Threading;
 using System.Diagnostics;
+using XtermSharp;
 
 namespace AvaloniaTerminal.Samples;
 
 public partial class ShellControl : UserControl
 {
-    private readonly TerminalControlModel _shellModel = new();
+    private readonly TerminalControlModel _shellModel = new(new TerminalOptions
+    {
+        ReflowOnResize = false,
+    });
+    private (int cols, int rows)? _lastResize;
 
     private IShellSession? _session;
 
@@ -31,7 +36,7 @@ public partial class ShellControl : UserControl
             _session.DataReceived += OnSessionDataReceived;
             _session.Exited += OnSessionExited;
 
-            _session.Resize(80, 25);
+            ApplyShellResize(Math.Max(_shellModel.Terminal.Cols, 1), Math.Max(_shellModel.Terminal.Rows, 1));
         }
         catch (Exception ex)
         {
@@ -84,7 +89,7 @@ public partial class ShellControl : UserControl
 
     private void OnTerminalSizeChanged(int cols, int rows, double width, double height)
     {
-        _session?.Resize(cols, rows);
+        ApplyShellResize(cols, rows);
     }
 
     protected override void OnDetachedFromVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
@@ -106,6 +111,7 @@ public partial class ShellControl : UserControl
         }
 
         _session = null;
+        _lastResize = null;
     }
 
     internal static ShellLaunchConfiguration ResolveShellLaunchConfiguration(Func<string, bool>? executableExists = null)
@@ -198,6 +204,28 @@ public partial class ShellControl : UserControl
         }
 
         return normalized.ToArray();
+    }
+
+    private void ApplyShellResize(int cols, int rows)
+    {
+        if (_session == null)
+        {
+            return;
+        }
+
+        if (!ShouldApplyShellResize(_lastResize, cols, rows, out var normalized))
+        {
+            return;
+        }
+
+        _lastResize = normalized;
+        _session.Resize(normalized.cols, normalized.rows);
+    }
+
+    internal static bool ShouldApplyShellResize((int cols, int rows)? lastResize, int cols, int rows, out (int cols, int rows) normalized)
+    {
+        normalized = (Math.Max(cols, 1), Math.Max(rows, 1));
+        return lastResize != normalized;
     }
 
     private static string? FindExecutableInPath(string command)

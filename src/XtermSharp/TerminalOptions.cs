@@ -7,6 +7,7 @@ namespace XtermSharp {
 	public class TerminalOptions {
 		public int Cols, Rows;
 		public bool ConvertEol = true, CursorBlink;
+		public bool ReflowOnResize { get; set; }
 		public string TermName;
 		public CursorStyle CursorStyle;
 		public bool ScreenReaderMode;
@@ -18,6 +19,7 @@ namespace XtermSharp {
 			Cols = 80;
 			Rows = 25;
 			TermName = "xterm";
+			ReflowOnResize = true;
 			Scrollback = 1000;
 			TabStopWidth = 8;
 		}

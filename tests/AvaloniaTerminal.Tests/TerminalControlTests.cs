@@ -599,6 +599,21 @@ public sealed class TerminalControlTests : AvaloniaTestBase
         Assert.True(redirected.Started);
     }
 
+    [Fact]
+    public void ShellSample_ShouldApplyShellResize_NormalizesAndDeduplicates()
+    {
+        var first = ShellControl.ShouldApplyShellResize(null, 0, -5, out var normalizedFirst);
+        var second = ShellControl.ShouldApplyShellResize(normalizedFirst, 1, 1, out var normalizedSecond);
+        var third = ShellControl.ShouldApplyShellResize(normalizedSecond, 2, 3, out var normalizedThird);
+
+        Assert.True(first);
+        Assert.Equal((1, 1), normalizedFirst);
+        Assert.False(second);
+        Assert.Equal((1, 1), normalizedSecond);
+        Assert.True(third);
+        Assert.Equal((2, 3), normalizedThird);
+    }
+
     private static TestableTerminalControl CreateControl(
         out TerminalControlModel model,
         out ScrollBar scrollBar)

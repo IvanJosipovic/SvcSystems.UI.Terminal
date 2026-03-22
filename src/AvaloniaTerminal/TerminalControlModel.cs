@@ -9,10 +9,10 @@ namespace AvaloniaTerminal;
 
 public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
 {
-    public TerminalControlModel()
+    public TerminalControlModel(TerminalOptions? options = null)
     {
         // get the dimensions of terminal (cols and rows)
-        Terminal = new Terminal(this);
+        Terminal = new Terminal(this, options);
         SelectionService = new SelectionService(Terminal);
         SearchService = new SearchService(Terminal);
         SelectionService.SelectionChanged += HandleSelectionChanged;
@@ -202,15 +202,13 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
 
     public void Resize(double width, double height, double textWidth, double textHeight)
     {
-        if (width == 0 || height == 0)
+        if (width <= 0 || height <= 0 || textWidth <= 0 || textHeight <= 0)
         {
-            width = 640;
-            height = 480;
+            return;
         }
 
-        var cols = (int)(width / textWidth);
-        var rows = (int)(height / textHeight);
-
+        var cols = Math.Max((int)(width / textWidth), 1);
+        var rows = Math.Max((int)(height / textHeight), 1);
 
         Terminal?.Resize(cols, rows);
         RemoveItemsDictionary();
@@ -538,11 +536,28 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
                 }
 
                 text = SetStyling(text, cd);
-                text.Text = cd.Code == 0 ? " " : ((char)cd.Rune).ToString();
+                text.Text = ConvertCharDataToText(cd);
             }
         }
 
         RemoveItemsDictionary();
+    }
+
+    private static string ConvertCharDataToText(CharData cd)
+    {
+        if (cd.Code == 0)
+        {
+            return " ";
+        }
+
+        try
+        {
+            return char.ConvertFromUtf32(checked((int)cd.Rune.Value));
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return "\uFFFD";
+        }
     }
 
     private static TextObject SetStyling(TextObject control, CharData cd)
