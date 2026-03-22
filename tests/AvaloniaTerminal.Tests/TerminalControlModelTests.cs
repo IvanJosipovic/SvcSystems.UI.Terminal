@@ -139,6 +139,30 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task Search_SelectsMatchesAndNavigatesBetweenResults()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+            model.Resize(width: 320, height: 120, textWidth: 8, textHeight: 16);
+            model.Feed("alpha beta alpha gamma alpha");
+
+            var count = model.Search("alpha");
+
+            Assert.Equal(3, count);
+            Assert.Equal(3, model.SearchResultCount);
+            Assert.Equal("alpha", model.SelectedText);
+            Assert.Equal(0, model.CurrentSearchResultIndex);
+
+            var nextIndex = model.SelectNextSearchResult();
+            Assert.Equal(1, nextIndex);
+
+            var previousIndex = model.SelectPreviousSearchResult();
+            Assert.Equal(0, previousIndex);
+        });
+    }
+
+    [Fact]
     public Task Send_EnsuresCaretIsVisibleWhenScrolledAway()
     {
         return RunInHeadlessSession(() =>

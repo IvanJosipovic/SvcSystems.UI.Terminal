@@ -44,6 +44,15 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
     [GeneratedDirectProperty]
     public partial bool HasSelection { get; set; }
 
+    [GeneratedDirectProperty]
+    public partial string LastSearchText { get; set; } = string.Empty;
+
+    [GeneratedDirectProperty]
+    public partial int SearchResultCount { get; set; }
+
+    [GeneratedDirectProperty]
+    public partial int CurrentSearchResultIndex { get; set; } = -1;
+
     /// <summary>
     /// Gets or sets a value indicating whether this <see cref="T:AvaloniaTerminal.TerminalControl"/> treats the "Alt/Option" key on the mac keyboard as a meta key,
     /// which has the effect of sending ESC+letter when Meta-letter is pressed.   Otherwise, it passes the keystroke that MacOS provides from the OS keyboard.
@@ -364,6 +373,60 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
     }
 
     /// <summary>
+    /// Searches the buffer, selects the first result, and returns the total number of matches.
+    /// </summary>
+    public int Search(string text)
+    {
+        var snapshot = SearchService.GetSnapshot();
+        var result = snapshot.FindText(text);
+
+        LastSearchText = text;
+        SearchResultCount = result;
+        CurrentSearchResultIndex = -1;
+
+        if (result > 0)
+        {
+            SelectSearchResult(snapshot.FindNext(), snapshot);
+        }
+        else
+        {
+            ClearSelection();
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Selects the next search result and returns its index, or -1 when no search results exist.
+    /// </summary>
+    public int SelectNextSearchResult()
+    {
+        var snapshot = SearchService.GetSnapshot();
+        if (snapshot.LastSearchResults.Length == 0)
+        {
+            return -1;
+        }
+
+        SelectSearchResult(snapshot.FindNext(), snapshot);
+        return CurrentSearchResultIndex;
+    }
+
+    /// <summary>
+    /// Selects the previous search result and returns its index, or -1 when no search results exist.
+    /// </summary>
+    public int SelectPreviousSearchResult()
+    {
+        var snapshot = SearchService.GetSnapshot();
+        if (snapshot.LastSearchResults.Length == 0)
+        {
+            return -1;
+        }
+
+        SelectSearchResult(snapshot.FindPrevious(), snapshot);
+        return CurrentSearchResultIndex;
+    }
+
+    /// <summary>
     /// Scrolls the terminal contents up by one page.
     /// </summary>
     public void PageUp()
@@ -419,6 +482,31 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
         SelectedText = selectedText;
         HasSelection = SelectionService.Active && !string.IsNullOrEmpty(selectedText);
         UpdateUI?.Invoke();
+    }
+
+    private void SelectSearchResult(SearchSnapshot.SearchResult? searchResult, SearchSnapshot snapshot)
+    {
+        ClearSelection();
+        if (searchResult == null)
+        {
+            CurrentSearchResultIndex = -1;
+            return;
+        }
+
+        SelectionService.SetSoftStart(searchResult.Start.Y - Terminal.Buffer.YDisp, searchResult.Start.X);
+        SelectionService.ShiftExtend(searchResult.End.Y - Terminal.Buffer.YDisp, searchResult.End.X);
+
+        CurrentSearchResultIndex = snapshot.CurrentSearchResult;
+
+        if ((searchResult.Start.Y < Terminal.Buffer.YDisp) || (searchResult.Start.Y >= Terminal.Buffer.YDisp + Terminal.Rows))
+        {
+            var newYDisp = Math.Max(searchResult.Start.Y - (Terminal.Rows / 2), 0);
+            ScrollToYDisp(newYDisp);
+        }
+        else
+        {
+            UpdateUI?.Invoke();
+        }
     }
 
     private void RebuildViewport()

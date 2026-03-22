@@ -127,6 +127,39 @@ public partial class TerminalControl : Grid
         private set => SetAndRaise(HasSelectionProperty, ref _hasSelection, value);
     }
 
+    public void SelectAll()
+    {
+        Model?.SelectAll();
+    }
+
+    public string CopySelection()
+    {
+        return SelectedText;
+    }
+
+    public void Paste(string text)
+    {
+        if (!string.IsNullOrEmpty(text))
+        {
+            Model?.Send(text);
+        }
+    }
+
+    public int Search(string text)
+    {
+        return Model?.Search(text) ?? 0;
+    }
+
+    public int SelectNextSearchResult()
+    {
+        return Model?.SelectNextSearchResult() ?? -1;
+    }
+
+    public int SelectPreviousSearchResult()
+    {
+        return Model?.SelectPreviousSearchResult() ?? -1;
+    }
+
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
@@ -316,8 +349,15 @@ public partial class TerminalControl : Grid
         }
         if (e.KeyModifiers is KeyModifiers.Alt)
         {
-            Model.Send([0x1B]);
-            if (!string.IsNullOrEmpty(e.KeySymbol))
+            if (Model.OptionAsMetaKey)
+            {
+                Model.Send([0x1B]);
+                if (!string.IsNullOrEmpty(e.KeySymbol))
+                {
+                    Model.Send(e.KeySymbol);
+                }
+            }
+            else if (!string.IsNullOrEmpty(e.KeySymbol))
             {
                 Model.Send(e.KeySymbol);
             }

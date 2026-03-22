@@ -101,6 +101,45 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task OptionAsMetaKey_False_DoesNotPrefixEscape()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            model.OptionAsMetaKey = false;
+
+            byte[]? sent = null;
+            model.UserInput += bytes => sent = bytes;
+
+            control.SimulateKeyUp(Key.A, KeyModifiers.Alt, "a");
+
+            Assert.NotNull(sent);
+            Assert.Equal("a"u8.ToArray(), sent);
+        });
+    }
+
+    [Fact]
+    public Task SearchHelpers_ForwardToModel()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            model.Feed("alpha beta alpha");
+
+            var count = control.Search("alpha");
+
+            Assert.Equal(2, count);
+            Assert.Equal("alpha", control.CopySelection());
+
+            var next = control.SelectNextSearchResult();
+            var previous = control.SelectPreviousSearchResult();
+
+            Assert.Equal(1, next);
+            Assert.Equal(0, previous);
+        });
+    }
+
+    [Fact]
     public Task PointerWheel_RepeatedScrollingAcrossScrollSample_DoesNotThrowAndStaysInBounds()
     {
         return RunInHeadlessSession(() =>
