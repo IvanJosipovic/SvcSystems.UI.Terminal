@@ -117,6 +117,28 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task SelectionProperties_ReflectSelectionServiceText()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+            TerminalSamples.LoadSelectionSample(model);
+
+            model.SetSoftSelectionStart(0, 0);
+            model.StartSelectionFromSoftStart();
+            model.DragExtendSelection(0, 8);
+
+            Assert.True(model.HasSelection);
+            Assert.Equal("Avalonia", model.SelectedText);
+
+            model.ClearSelection();
+
+            Assert.False(model.HasSelection);
+            Assert.Equal(string.Empty, model.SelectedText);
+        });
+    }
+
+    [Fact]
     public Task Send_EnsuresCaretIsVisibleWhenScrolledAway()
     {
         return RunInHeadlessSession(() =>

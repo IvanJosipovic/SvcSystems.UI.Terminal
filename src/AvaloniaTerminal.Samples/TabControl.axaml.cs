@@ -3,9 +3,9 @@ using Avalonia.Markup.Xaml;
 
 namespace AvaloniaTerminal.Samples;
 
-public partial class Powershell : Window
+public partial class TabControl : Window
 {
-    public Powershell()
+    public TabControl()
     {
         InitializeComponent();
     }

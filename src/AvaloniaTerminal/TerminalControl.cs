@@ -30,6 +30,16 @@ public partial class TerminalControl : Grid
 
     private bool _isUpdatingScrollBar;
 
+    private bool _didSelectionDrag;
+
+    private bool _selectionPointerCaptured;
+
+    private int _selectionClickCount;
+
+    private string _selectedText = string.Empty;
+
+    private bool _hasSelection;
+
     public TerminalControl()
     {
         Focusable = true;
@@ -85,10 +95,36 @@ public partial class TerminalControl : Grid
 
     public static readonly StyledProperty<IBrush?> CaretBrushProperty = AvaloniaProperty.Register<TerminalControl, IBrush?>(nameof(CaretBrush));
 
+    public static readonly StyledProperty<IBrush?> SelectionBrushProperty = AvaloniaProperty.Register<TerminalControl, IBrush?>(nameof(SelectionBrush));
+
+    public static readonly DirectProperty<TerminalControl, string> SelectedTextProperty =
+        AvaloniaProperty.RegisterDirect<TerminalControl, string>(nameof(SelectedText), o => o.SelectedText);
+
+    public static readonly DirectProperty<TerminalControl, bool> HasSelectionProperty =
+        AvaloniaProperty.RegisterDirect<TerminalControl, bool>(nameof(HasSelection), o => o.HasSelection);
+
     public IBrush? CaretBrush
     {
         get => GetValue(CaretBrushProperty);
         set => SetValue(CaretBrushProperty, value);
+    }
+
+    public IBrush? SelectionBrush
+    {
+        get => GetValue(SelectionBrushProperty);
+        set => SetValue(SelectionBrushProperty, value);
+    }
+
+    public string SelectedText
+    {
+        get => _selectedText;
+        private set => SetAndRaise(SelectedTextProperty, ref _selectedText, value);
+    }
+
+    public bool HasSelection
+    {
+        get => _hasSelection;
+        private set => SetAndRaise(HasSelectionProperty, ref _hasSelection, value);
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
@@ -107,6 +143,7 @@ public partial class TerminalControl : Grid
                 newModel.UpdateUI = RefreshFromModel;
             }
 
+            SyncSelectionStateFromModel();
             UpdateScrollBar();
             ResizeModelToViewport();
             _surface.InvalidateVisual();
@@ -138,6 +175,8 @@ public partial class TerminalControl : Grid
         {
             return;
         }
+
+        Model.ClearSelection();
 
         if (e.KeyModifiers is KeyModifiers.Control)
         {
@@ -404,6 +443,52 @@ public partial class TerminalControl : Grid
     {
         base.OnPointerPressed(e);
         Focus(NavigationMethod.Pointer);
+
+        if (Model == null || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        if (HandleSelectionPressed(e.GetPosition(_surface), e.KeyModifiers, e.ClickCount))
+        {
+            _selectionClickCount = e.ClickCount;
+            _selectionPointerCaptured = true;
+            e.Pointer.Capture(_surface);
+            e.Handled = true;
+        }
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        base.OnPointerMoved(e);
+
+        if (!_selectionPointerCaptured || Model == null)
+        {
+            return;
+        }
+
+        if (HandleSelectionMoved(e.GetPosition(_surface)))
+        {
+            e.Handled = true;
+        }
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        base.OnPointerReleased(e);
+
+        if (!_selectionPointerCaptured || Model == null)
+        {
+            return;
+        }
+
+        _selectionPointerCaptured = false;
+        e.Pointer.Capture(null);
+
+        if (HandleSelectionReleased(e.GetPosition(_surface), e.KeyModifiers, _selectionClickCount))
+        {
+            e.Handled = true;
+        }
     }
 
     protected override void OnGotFocus(GotFocusEventArgs e)
@@ -448,6 +533,7 @@ public partial class TerminalControl : Grid
 
     private void RefreshFromModel()
     {
+        SyncSelectionStateFromModel();
         UpdateScrollBar();
         _surface.InvalidateVisual();
     }
@@ -457,6 +543,110 @@ public partial class TerminalControl : Grid
     internal bool HasVisibleCaret => TryGetCaretRect(out _);
 
     internal Rect CaretRect => TryGetCaretRect(out var rect) ? rect : default;
+
+    internal Point GetCellCenter(int col, int row)
+    {
+        return new Point(
+            (col * _consoleTextSize.Width) + (_consoleTextSize.Width / 2),
+            (row * _consoleTextSize.Height) + (_consoleTextSize.Height / 2));
+    }
+
+    internal bool HandleSelectionPressed(Point position, KeyModifiers modifiers, int clickCount)
+    {
+        if (!TryGetCellFromPoint(position, includeOutsideBounds: true, out var col, out var row) || Model == null)
+        {
+            return false;
+        }
+
+        _didSelectionDrag = false;
+
+        if (clickCount >= 3)
+        {
+            Model.SelectRow(row);
+            return true;
+        }
+
+        if (clickCount == 2)
+        {
+            Model.SelectWordOrExpression(row, col);
+            return true;
+        }
+
+        if (modifiers.HasFlag(KeyModifiers.Shift))
+        {
+            Model.ShiftExtendSelection(row, col);
+            return true;
+        }
+
+        if (!Model.HasSelection)
+        {
+            Model.SetSoftSelectionStart(row, col);
+        }
+
+        return true;
+    }
+
+    internal bool HandleSelectionMoved(Point position)
+    {
+        if (!TryGetCellFromPoint(position, includeOutsideBounds: true, out var col, out var row) || Model == null)
+        {
+            return false;
+        }
+
+        if (!Model.SelectionService.Active)
+        {
+            Model.StartSelectionFromSoftStart();
+            Model.DragExtendSelection(row, col);
+        }
+        else
+        {
+            Model.DragExtendSelection(row, col);
+        }
+
+        _didSelectionDrag = true;
+        return true;
+    }
+
+    internal bool HandleSelectionReleased(Point position, KeyModifiers modifiers, int clickCount)
+    {
+        if (!TryGetCellFromPoint(position, includeOutsideBounds: true, out var col, out var row) || Model == null)
+        {
+            return false;
+        }
+
+        if (clickCount >= 2)
+        {
+            _didSelectionDrag = false;
+            return true;
+        }
+
+        if (!Model.SelectionService.Active)
+        {
+            if (modifiers.HasFlag(KeyModifiers.Shift))
+            {
+                Model.ShiftExtendSelection(row, col);
+            }
+            else
+            {
+                Model.SetSoftSelectionStart(row, col);
+            }
+        }
+        else if (!_didSelectionDrag)
+        {
+            if (modifiers.HasFlag(KeyModifiers.Shift))
+            {
+                Model.ShiftExtendSelection(row, col);
+            }
+            else
+            {
+                Model.ClearSelection();
+                Model.SetSoftSelectionStart(row, col);
+            }
+        }
+
+        _didSelectionDrag = false;
+        return true;
+    }
 
     private bool TryGetCaretRect(out Rect rect)
     {
@@ -473,6 +663,30 @@ public partial class TerminalControl : Grid
             Math.Max(_consoleTextSize.Width, 1),
             Math.Max(_consoleTextSize.Height, 1));
 
+        return true;
+    }
+
+    private bool TryGetCellFromPoint(Point position, bool includeOutsideBounds, out int col, out int row)
+    {
+        col = 0;
+        row = 0;
+
+        if (_consoleTextSize.Width <= 0 || _consoleTextSize.Height <= 0 || Model == null)
+        {
+            return false;
+        }
+
+        var rawCol = (int)Math.Floor(position.X / _consoleTextSize.Width);
+        var rawRow = (int)Math.Floor(position.Y / _consoleTextSize.Height);
+
+        if (!includeOutsideBounds &&
+            (rawCol < 0 || rawCol >= Model.Terminal.Cols || rawRow < 0 || rawRow >= Model.Terminal.Rows))
+        {
+            return false;
+        }
+
+        col = Math.Clamp(rawCol, 0, Math.Max(Model.Terminal.Cols - 1, 0));
+        row = Math.Clamp(rawRow, 0, Math.Max(Model.Terminal.Rows - 1, 0));
         return true;
     }
 
@@ -564,6 +778,14 @@ public partial class TerminalControl : Grid
                 }
             }
 
+            if (owner.Model.HasSelection)
+            {
+                foreach (var selectionRect in owner.GetSelectionRects())
+                {
+                    context.FillRectangle(owner.ResolveSelectionBrush(), selectionRect);
+                }
+            }
+
             if (!owner.TryGetCaretRect(out var caretRect))
             {
                 return;
@@ -595,6 +817,79 @@ public partial class TerminalControl : Grid
             base.OnSizeChanged(e);
             owner.ResizeModelToViewport();
         }
+    }
+
+    private IEnumerable<Rect> GetSelectionRects()
+    {
+        if (Model == null || !Model.SelectionService.Active)
+        {
+            yield break;
+        }
+
+        var selection = Model.SelectionService;
+        var start = selection.Start;
+        var end = selection.End;
+
+        if (start == end)
+        {
+            yield break;
+        }
+
+        if ((start.Y > end.Y) || (start.Y == end.Y && start.X > end.X))
+        {
+            (start, end) = (end, start);
+        }
+
+        var screenStartRow = start.Y - Model.Terminal.Buffer.YDisp;
+        var screenEndRow = end.Y - Model.Terminal.Buffer.YDisp;
+
+        for (var row = screenStartRow; row <= screenEndRow; row++)
+        {
+            if (row < 0 || row >= Model.Terminal.Rows)
+            {
+                continue;
+            }
+
+            var colStart = row == screenStartRow ? start.X : 0;
+            var colEnd = row == screenEndRow ? end.X : Model.Terminal.Cols;
+
+            if (colEnd == colStart)
+            {
+                colEnd = Math.Min(colStart + 1, Model.Terminal.Cols);
+            }
+
+            if (colEnd < colStart)
+            {
+                (colStart, colEnd) = (colEnd, colStart);
+            }
+
+            yield return new Rect(
+                (colStart * _consoleTextSize.Width) - 1,
+                row * _consoleTextSize.Height,
+                Math.Max(((colEnd - colStart) * _consoleTextSize.Width) + 2, _consoleTextSize.Width),
+                _consoleTextSize.Height);
+        }
+    }
+
+    private IBrush ResolveSelectionBrush()
+    {
+        if (SelectionBrush is not null)
+        {
+            return SelectionBrush;
+        }
+
+        if (Application.Current?.FindResource("ThemeAccentBrush") is ISolidColorBrush accentBrush)
+        {
+            return new SolidColorBrush(accentBrush.Color, 0.35);
+        }
+
+        return new SolidColorBrush(Avalonia.Media.Color.FromArgb(96, 96, 160, 255));
+    }
+
+    private void SyncSelectionStateFromModel()
+    {
+        SelectedText = Model?.SelectedText ?? string.Empty;
+        HasSelection = Model?.HasSelection ?? false;
     }
 
     private IBrush ResolveCaretBrush()

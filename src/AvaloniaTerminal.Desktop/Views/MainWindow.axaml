@@ -16,5 +16,8 @@
         <TabItem Header="Scroll">
             <samples:ScrollSampleControl />
         </TabItem>
+        <TabItem Header="Selection">
+            <samples:SelectionControl />
+        </TabItem>
     </TabControl>
 </Window>

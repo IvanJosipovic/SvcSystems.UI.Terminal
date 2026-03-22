@@ -66,6 +66,41 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task DragSelection_UpdatesSelectedTextAndControlBinding()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            TerminalSamples.LoadSelectionSample(model);
+
+            control.HandleSelectionPressed(control.GetCellCenter(0, 0), KeyModifiers.None, clickCount: 1);
+            control.HandleSelectionMoved(control.GetCellCenter(8, 0));
+            control.HandleSelectionReleased(control.GetCellCenter(8, 0), KeyModifiers.None, clickCount: 1);
+
+            Assert.True(model.HasSelection);
+            Assert.Equal("Avalonia", model.SelectedText);
+            Assert.True(control.HasSelection);
+            Assert.Equal(model.SelectedText, control.SelectedText);
+        });
+    }
+
+    [Fact]
+    public Task DoubleClickSelection_SelectsWord()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            TerminalSamples.LoadSelectionSample(model);
+
+            control.HandleSelectionPressed(control.GetCellCenter(10, 0), KeyModifiers.None, clickCount: 2);
+            control.HandleSelectionReleased(control.GetCellCenter(10, 0), KeyModifiers.None, clickCount: 2);
+
+            Assert.True(model.HasSelection);
+            Assert.Equal("Terminal", model.SelectedText);
+        });
+    }
+
+    [Fact]
     public Task PointerWheel_RepeatedScrollingAcrossScrollSample_DoesNotThrowAndStaysInBounds()
     {
         return RunInHeadlessSession(() =>

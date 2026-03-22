@@ -15,9 +15,11 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
         Terminal = new Terminal(this);
         SelectionService = new SelectionService(Terminal);
         SearchService = new SearchService(Terminal);
+        SelectionService.SelectionChanged += HandleSelectionChanged;
 
         // trigger an update of the buffers
         FullBufferUpdate();
+        HandleSelectionChanged();
         UpdateDisplay();
     }
 
@@ -35,6 +37,12 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
 
     [GeneratedDirectProperty]
     public partial Dictionary<(int x, int y), TextObject> ConsoleText { get; set; } = [];
+
+    [GeneratedDirectProperty]
+    public partial string SelectedText { get; set; } = string.Empty;
+
+    [GeneratedDirectProperty]
+    public partial bool HasSelection { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether this <see cref="T:AvaloniaTerminal.TerminalControl"/> treats the "Alt/Option" key on the mac keyboard as a meta key,
@@ -283,6 +291,79 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
     }
 
     /// <summary>
+    /// Starts a selection drag from the given viewport row and column.
+    /// </summary>
+    public void StartSelection(int row, int col)
+    {
+        SelectionService.StartSelection(row, col);
+    }
+
+    /// <summary>
+    /// Starts a selection drag from the previously stored soft selection start.
+    /// </summary>
+    public void StartSelectionFromSoftStart()
+    {
+        SelectionService.StartSelection();
+    }
+
+    /// <summary>
+    /// Records a soft selection start without activating selection.
+    /// </summary>
+    public void SetSoftSelectionStart(int row, int col)
+    {
+        SelectionService.SetSoftStart(row, col);
+        HandleSelectionChanged();
+    }
+
+    /// <summary>
+    /// Extends the selection to the given viewport row and column.
+    /// </summary>
+    public void DragExtendSelection(int row, int col)
+    {
+        SelectionService.DragExtend(row, col);
+    }
+
+    /// <summary>
+    /// Extends the selection using shift-click semantics.
+    /// </summary>
+    public void ShiftExtendSelection(int row, int col)
+    {
+        SelectionService.ShiftExtend(row, col);
+    }
+
+    /// <summary>
+    /// Selects the word or expression at the given viewport row and column.
+    /// </summary>
+    public void SelectWordOrExpression(int row, int col)
+    {
+        SelectionService.SelectWordOrExpression(col, row);
+    }
+
+    /// <summary>
+    /// Selects the full row at the given viewport row.
+    /// </summary>
+    public void SelectRow(int row)
+    {
+        SelectionService.SelectRow(row);
+    }
+
+    /// <summary>
+    /// Selects the entire buffer.
+    /// </summary>
+    public void SelectAll()
+    {
+        SelectionService.SelectAll();
+    }
+
+    /// <summary>
+    /// Clears the current selection.
+    /// </summary>
+    public void ClearSelection()
+    {
+        SelectionService.SelectNone();
+    }
+
+    /// <summary>
     /// Scrolls the terminal contents up by one page.
     /// </summary>
     public void PageUp()
@@ -330,6 +411,14 @@ public partial class TerminalControlModel : AvaloniaObject, ITerminalDelegate
         }
 
         return 1;
+    }
+
+    private void HandleSelectionChanged()
+    {
+        var selectedText = SelectionService.Active ? SelectionService.GetSelectedText() : string.Empty;
+        SelectedText = selectedText;
+        HasSelection = SelectionService.Active && !string.IsNullOrEmpty(selectedText);
+        UpdateUI?.Invoke();
     }
 
     private void RebuildViewport()
