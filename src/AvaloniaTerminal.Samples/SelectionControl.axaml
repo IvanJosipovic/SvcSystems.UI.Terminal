@@ -21,6 +21,7 @@
         </Border>
         <local:TerminalControl
             Name="SelectionTerminalControl"
-            Grid.Row="2" />
+            Grid.Row="2"
+            RightClickAction="CopyOrPaste" />
     </Grid>
 </UserControl>

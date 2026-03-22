@@ -64,55 +64,7 @@ References:
 ## 4) ViewModel base
 - All ViewModels inherit from `ViewModelBase`.
 
-## 5) Input and interaction via Xaml.Behaviors (required)
-
-Reference: https://github.com/wieslawsoltes/Xaml.Behaviors
-
-- All UI input and events are handled via behaviors/triggers.
-- Prefer source-generator-based behaviors/actions (no reflection) wherever available.
-- Use trigger behaviors (property, data, loaded/unloaded, routed event) for
-  lifecycles and state transitions.
-- Code-behind must not contain event handlers or direct ViewModel calls.
-
-## 6) Docking layout with Dock for Avalonia (required)
-
-Reference: https://github.com/wieslawsoltes/Dock
-
-- Use Dock.Model.* to represent the docking layout state.
-- Use Dock.Avalonia for the view layer and Dock.Model.MVVM
-  integration.
-- Persist layout state to user settings and restore on startup.
-- Keep layout logic in ViewModels; Views only render the Dock model.
-
-## 7) Text editing with AvaloniaEdit (required)
-
-Reference: https://github.com/AvaloniaUI/AvaloniaEdit
-
-- Use AvaloniaEdit `TextEditor` for all code/text editing surfaces.
-- Enable syntax highlighting using TextMate grammars/themes.
-- Keep editor configuration in ViewModels (options, text, selection) and bind to
-  the view.
-
-## 8) Data presentation with ProDataGrid (required)
-
-Reference: https://github.com/wieslawsoltes/ProDataGrid
-
-- Use ProDataGrid `DataGrid` for all tabular data, tree views, and list displays.
-- Always use the ProDataGrid model approach with code-based column bindings and
-  fast paths.
-- Always enable full filtering, searching, and sorting support.
-
-## 9) Dependency Injection (Microsoft.Extensions.DependencyInjection)
-
-- Configure services in a single composition root (App startup).
-- Use `AddSingleton`, `AddScoped`, `AddTransient` correctly:
-  - Singleton: thread-safe, shared, expensive-to-create services.
-  - Scoped: per-document or per-operation services created within explicit scopes.
-  - Transient: stateless lightweight services.
-- Never resolve scoped services from singletons without creating a scope.
-- Do not dispose services resolved from the container manually.
-
-## 10) Performance (required)
+## 5) Performance (required)
 
 - Prefer allocation-free APIs: `Span<T>`, `ReadOnlySpan<T>`, `Memory<T>`,
   `ValueTask`, `ArrayPool<T>`, and `System.Buffers`.
@@ -123,14 +75,14 @@ Reference: https://github.com/wieslawsoltes/ProDataGrid
   allocations in render/update loops.
 - Profile before and after optimizations; document expected gains.
 
-## 11) Reflection and source generation (required)
+## 6) Reflection and source generation (required)
 
 - Avoid reflection whenever possible.
 - Prefer source generators (incremental generators required) before any reflection-based
   approach.
 - If reflection is the only viable option, ask the user explicitly before introducing it.
 
-## 12) Testing and validation
+## 7) Testing and validation
 
 References:
 - https://github.com/AvaloniaUI/Avalonia
@@ -142,7 +94,7 @@ References:
 - Use integration tests for parsing, IO, and docking layout persistence.
 - UI tests should validate navigation flows, docking, and editor behaviors.
 
-## 13) Code conventions
+## 8) Code conventions
 
 - No code-behind event handlers.
 - Avoid static state (except truly immutable constants).

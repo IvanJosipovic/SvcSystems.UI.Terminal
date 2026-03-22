@@ -7,6 +7,8 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
 using System.Globalization;
+using System.Threading.Tasks;
+using Avalonia.Threading;
 using XtermSharp;
 using Point = Avalonia.Point;
 
@@ -15,6 +17,7 @@ namespace AvaloniaTerminal;
 public partial class TerminalControl : Grid
 {
     private const double ScrollBarWidth = 16;
+    private static readonly TimeSpan SelectionAutoScrollInterval = TimeSpan.FromMilliseconds(80);
 
     private Size _consoleTextSize;
 
@@ -36,6 +39,10 @@ public partial class TerminalControl : Grid
 
     private int _selectionClickCount;
 
+    private int _selectionAutoScrollDelta;
+
+    private Point _lastSelectionPointerPosition;
+
     private bool _terminalMouseCaptured;
 
     private int _activeTerminalMouseButton;
@@ -43,6 +50,8 @@ public partial class TerminalControl : Grid
     private string _selectedText = string.Empty;
 
     private bool _hasSelection;
+
+    private readonly DispatcherTimer _selectionAutoScrollTimer;
 
     public TerminalControl()
     {
@@ -68,6 +77,12 @@ public partial class TerminalControl : Grid
         SetColumn(_verticalScrollBar, 1);
         _verticalScrollBar.ValueChanged += OnVerticalScrollBarValueChanged;
         Children.Add(_verticalScrollBar);
+
+        _selectionAutoScrollTimer = new DispatcherTimer
+        {
+            Interval = SelectionAutoScrollInterval,
+        };
+        _selectionAutoScrollTimer.Tick += OnSelectionAutoScrollTimerTick;
 
         CalculateTextSize();
         UpdateScrollBar();
@@ -101,6 +116,9 @@ public partial class TerminalControl : Grid
 
     public static readonly StyledProperty<IBrush?> SelectionBrushProperty = AvaloniaProperty.Register<TerminalControl, IBrush?>(nameof(SelectionBrush));
 
+    public static readonly StyledProperty<RightClickAction> RightClickActionProperty =
+        AvaloniaProperty.Register<TerminalControl, RightClickAction>(nameof(RightClickAction), RightClickAction.ContextMenu);
+
     public static readonly DirectProperty<TerminalControl, string> SelectedTextProperty =
         AvaloniaProperty.RegisterDirect<TerminalControl, string>(nameof(SelectedText), o => o.SelectedText);
 
@@ -119,6 +137,12 @@ public partial class TerminalControl : Grid
         set => SetValue(SelectionBrushProperty, value);
     }
 
+    public RightClickAction RightClickAction
+    {
+        get => GetValue(RightClickActionProperty);
+        set => SetValue(RightClickActionProperty, value);
+    }
+
     public string SelectedText
     {
         get => _selectedText;
@@ -132,6 +156,12 @@ public partial class TerminalControl : Grid
     }
 
     public bool IsMouseModeActive => Model?.IsMouseModeActive ?? false;
+
+    public new event EventHandler<TerminalContextRequestedEventArgs>? ContextRequested;
+
+    internal Func<Task<string?>>? ClipboardTextReaderOverride { get; set; }
+
+    internal Func<string, Task>? ClipboardTextWriterOverride { get; set; }
 
     public void SelectAll()
     {
@@ -148,6 +178,51 @@ public partial class TerminalControl : Grid
         if (!string.IsNullOrEmpty(text))
         {
             Model?.Send(text);
+        }
+    }
+
+    public async Task CopySelectionAsync()
+    {
+        if (!HasSelection)
+        {
+            return;
+        }
+
+        if (ClipboardTextWriterOverride != null)
+        {
+            await ClipboardTextWriterOverride(SelectedText).ConfigureAwait(true);
+            return;
+        }
+
+        var clipboard = ResolveClipboard();
+        if (clipboard != null)
+        {
+            await clipboard.SetTextAsync(SelectedText).ConfigureAwait(true);
+        }
+    }
+
+    public async Task PasteFromClipboardAsync()
+    {
+        string? text;
+        if (ClipboardTextReaderOverride != null)
+        {
+            text = await ClipboardTextReaderOverride().ConfigureAwait(true);
+        }
+        else
+        {
+            var clipboard = ResolveClipboard();
+            if (clipboard == null)
+            {
+                return;
+            }
+#pragma warning disable CS0618
+            text = await clipboard.GetTextAsync().ConfigureAwait(true);
+#pragma warning restore CS0618
+        }
+
+        if (!string.IsNullOrEmpty(text))
+        {
+            Paste(text);
         }
     }
 
@@ -510,6 +585,8 @@ public partial class TerminalControl : Grid
         {
             _selectionClickCount = e.ClickCount;
             _selectionPointerCaptured = true;
+            _lastSelectionPointerPosition = e.GetPosition(_surface);
+            UpdateSelectionAutoScroll(e.GetPosition(_surface));
             e.Pointer.Capture(_surface);
             e.Handled = true;
         }
@@ -530,8 +607,11 @@ public partial class TerminalControl : Grid
             return;
         }
 
+        _lastSelectionPointerPosition = e.GetPosition(_surface);
+
         if (HandleSelectionMoved(e.GetPosition(_surface)))
         {
+            UpdateSelectionAutoScroll(_lastSelectionPointerPosition);
             e.Handled = true;
         }
     }
@@ -546,18 +626,38 @@ public partial class TerminalControl : Grid
             return;
         }
 
+        if (!IsMouseModeActive && e.InitialPressMouseButton == MouseButton.Right)
+        {
+            if (HandleRightClickAction(e.GetPosition(this)))
+            {
+                e.Handled = true;
+                return;
+            }
+
+            e.Handled = true;
+            return;
+        }
+
         if (!_selectionPointerCaptured || Model == null)
         {
             return;
         }
 
         _selectionPointerCaptured = false;
+        StopSelectionAutoScroll();
         e.Pointer.Capture(null);
 
         if (HandleSelectionReleased(e.GetPosition(_surface), e.KeyModifiers, _selectionClickCount))
         {
             e.Handled = true;
         }
+    }
+
+    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    {
+        base.OnPointerCaptureLost(e);
+        _selectionPointerCaptured = false;
+        StopSelectionAutoScroll();
     }
 
     protected override void OnGotFocus(GotFocusEventArgs e)
@@ -885,6 +985,134 @@ public partial class TerminalControl : Grid
             _ => 0,
         };
     }
+
+    private void OnSelectionAutoScrollTimerTick(object? sender, EventArgs e)
+    {
+        ProcessSelectionAutoScroll();
+    }
+
+    private void UpdateSelectionAutoScroll(Point position)
+    {
+        _selectionAutoScrollDelta = CalculateSelectionAutoScrollDelta(position);
+
+        if (_selectionAutoScrollDelta == 0)
+        {
+            StopSelectionAutoScroll();
+            return;
+        }
+
+        if (!_selectionAutoScrollTimer.IsEnabled)
+        {
+            _selectionAutoScrollTimer.Start();
+        }
+    }
+
+    private int CalculateSelectionAutoScrollDelta(Point position)
+    {
+        if (Model == null || !HasActiveSelectionDrag() || _consoleTextSize.Height <= 0)
+        {
+            return 0;
+        }
+
+        var rawRow = (int)Math.Floor(position.Y / _consoleTextSize.Height);
+        if (rawRow < 0)
+        {
+            return CalculateScrollVelocity(-rawRow) * -1;
+        }
+
+        if (rawRow >= Model.Terminal.Rows)
+        {
+            return CalculateScrollVelocity(rawRow - Model.Terminal.Rows);
+        }
+
+        return 0;
+    }
+
+    private int CalculateScrollVelocity(int delta)
+    {
+        if (Model == null)
+        {
+            return 0;
+        }
+
+        if (delta > 9)
+        {
+            return Math.Max(Model.Terminal.Rows, 20);
+        }
+
+        if (delta > 5)
+        {
+            return 10;
+        }
+
+        if (delta > 1)
+        {
+            return 3;
+        }
+
+        return 1;
+    }
+
+    private bool HasActiveSelectionDrag()
+    {
+        return _selectionPointerCaptured && Model != null && !Model.IsMouseModeActive;
+    }
+
+    private void ProcessSelectionAutoScroll()
+    {
+        if (!HasActiveSelectionDrag() || _selectionAutoScrollDelta == 0 || Model == null)
+        {
+            StopSelectionAutoScroll();
+            return;
+        }
+
+        Model.ScrollLines(_selectionAutoScrollDelta);
+        HandleSelectionMoved(_lastSelectionPointerPosition);
+    }
+
+    private void StopSelectionAutoScroll()
+    {
+        _selectionAutoScrollDelta = 0;
+        if (_selectionAutoScrollTimer.IsEnabled)
+        {
+            _selectionAutoScrollTimer.Stop();
+        }
+    }
+
+    private Avalonia.Input.Platform.IClipboard? ResolveClipboard()
+    {
+        return TopLevel.GetTopLevel(this)?.Clipboard;
+    }
+
+    private void RaiseContextRequested(Point position)
+    {
+        ContextRequested?.Invoke(this, new TerminalContextRequestedEventArgs(position, SelectedText, HasSelection));
+    }
+
+    private bool HandleRightClickAction(Point position)
+    {
+        switch (RightClickAction)
+        {
+            case RightClickAction.None:
+                return false;
+            case RightClickAction.CopyOrPaste:
+                if (HasSelection)
+                {
+                    _ = CopySelectionAsync();
+                }
+                else
+                {
+                    _ = PasteFromClipboardAsync();
+                }
+
+                return true;
+            case RightClickAction.ContextMenu:
+            default:
+                RaiseContextRequested(position);
+                return true;
+        }
+    }
+
     private bool TryGetCellFromPoint(Point position, bool includeOutsideBounds, out int col, out int row)
     {
         col = 0;
@@ -1153,4 +1381,11 @@ public partial class TerminalControl : Grid
             ? new SolidColorBrush(Colors.Black)
             : new SolidColorBrush(Colors.White);
     }
+
+    internal void ProcessSelectionAutoScrollForTests()
+    {
+        ProcessSelectionAutoScroll();
+    }
+
+    internal int SelectionAutoScrollDeltaForTests => _selectionAutoScrollDelta;
 }

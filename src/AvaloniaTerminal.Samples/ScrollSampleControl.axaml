@@ -9,6 +9,7 @@
             Text="Scrollable sample with 500 preloaded lines." />
         <local:TerminalControl
             Name="ScrollTerminalControl"
-            Grid.Row="1" />
+            Grid.Row="1"
+            RightClickAction="CopyOrPaste" />
     </Grid>
 </UserControl>

@@ -198,6 +198,91 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task SelectionAutoScroll_DraggingBelowViewport_ScrollsAndExtendsSelection()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            PopulateScrollback(model);
+            var initialOffset = Math.Max(1, model.MaxScrollback / 2);
+            model.ScrollToYDisp(initialOffset);
+
+            control.SimulatePointerPressed(control.GetCellCenter(0, 1), clickCount: 1);
+            control.SimulatePointerMoved(new Point(10, control.Bounds.Height + 48), isLeftButtonPressed: true);
+
+            Assert.True(control.SelectionAutoScrollDeltaForTests > 0);
+
+            control.ProcessSelectionAutoScrollForTests();
+
+            Assert.True(model.ScrollOffset > initialOffset);
+            Assert.True(model.HasSelection);
+            Assert.False(string.IsNullOrEmpty(model.SelectedText));
+        });
+    }
+
+    [Fact]
+    public Task SelectionAutoScroll_DraggingAboveViewport_ScrollsAndExtendsSelection()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            PopulateScrollback(model);
+            var initialOffset = Math.Max(1, model.MaxScrollback / 2);
+            model.ScrollToYDisp(initialOffset);
+
+            control.SimulatePointerPressed(control.GetCellCenter(0, 2), clickCount: 1);
+            control.SimulatePointerMoved(new Point(10, -48), isLeftButtonPressed: true);
+
+            Assert.True(control.SelectionAutoScrollDeltaForTests < 0);
+
+            control.ProcessSelectionAutoScrollForTests();
+
+            Assert.True(model.ScrollOffset < initialOffset);
+            Assert.True(model.HasSelection);
+            Assert.False(string.IsNullOrEmpty(model.SelectedText));
+        });
+    }
+
+    [Fact]
+    public Task SelectionAutoScroll_StopsOnPointerRelease()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            PopulateScrollback(model);
+            model.ScrollToYDisp(Math.Max(1, model.MaxScrollback / 2));
+
+            var outsidePoint = new Point(10, control.Bounds.Height + 48);
+            control.SimulatePointerPressed(control.GetCellCenter(0, 1), clickCount: 1);
+            control.SimulatePointerMoved(outsidePoint, isLeftButtonPressed: true);
+
+            Assert.NotEqual(0, control.SelectionAutoScrollDeltaForTests);
+
+            control.SimulatePointerReleased(outsidePoint);
+
+            Assert.Equal(0, control.SelectionAutoScrollDeltaForTests);
+        });
+    }
+
+    [Fact]
+    public Task SelectionAutoScroll_DoesNotActivateWhenMouseModeIsEnabled()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            PopulateScrollback(model);
+            model.Feed("\u001b[?1006h\u001b[?1000h");
+
+            control.SimulatePointerPressed(control.GetCellCenter(0, 1), clickCount: 1);
+            control.SimulatePointerMoved(new Point(10, control.Bounds.Height + 48), isLeftButtonPressed: true);
+
+            Assert.True(model.IsMouseModeActive);
+            Assert.Equal(0, control.SelectionAutoScrollDeltaForTests);
+            Assert.False(model.HasSelection);
+        });
+    }
+
+    [Fact]
     public Task PointerPosition_MapsToExpectedCellCoordinates()
     {
         return RunInHeadlessSession(() =>
@@ -211,6 +296,173 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             Assert.True(control.TryGetCellFromPointForTests(new Point(-20, -10), includeOutsideBounds: true, out col, out row));
             Assert.Equal(0, col);
             Assert.Equal(0, row);
+        });
+    }
+
+    [Fact]
+    public Task ContextRequested_RaisesWithSelectionStateAndPointerPosition()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            TerminalSamples.LoadSelectionSample(model);
+            control.HandleSelectionPressed(control.GetCellCenter(0, 0), KeyModifiers.None, clickCount: 1);
+            control.HandleSelectionMoved(control.GetCellCenter(8, 0));
+            control.HandleSelectionReleased(control.GetCellCenter(8, 0), KeyModifiers.None, clickCount: 1);
+
+            TerminalContextRequestedEventArgs? raised = null;
+            control.ContextRequested += (_, args) => raised = args;
+
+            var point = new Point(42, 18);
+            control.SimulatePointerReleased(point, MouseButton.Right);
+
+            Assert.NotNull(raised);
+            Assert.True(raised.HasSelection);
+            Assert.Equal("Avalonia", raised.SelectedText);
+            Assert.Equal(point, raised.Position);
+        });
+    }
+
+    [Fact]
+    public Task ContextRequested_RaisesWithoutSelection()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out _, out _);
+
+            TerminalContextRequestedEventArgs? raised = null;
+            control.ContextRequested += (_, args) => raised = args;
+
+            var point = new Point(12, 9);
+            control.SimulatePointerReleased(point, MouseButton.Right);
+
+            Assert.NotNull(raised);
+            Assert.False(raised.HasSelection);
+            Assert.Equal(string.Empty, raised.SelectedText);
+            Assert.Equal(point, raised.Position);
+        });
+    }
+
+    [Fact]
+    public Task RightClickAction_CopyOrPaste_CopiesSelection()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            control.RightClickAction = RightClickAction.CopyOrPaste;
+
+            string? clipboardText = null;
+            control.ClipboardTextWriterOverride = text =>
+            {
+                clipboardText = text;
+                return Task.CompletedTask;
+            };
+
+            TerminalSamples.LoadSelectionSample(model);
+            control.HandleSelectionPressed(control.GetCellCenter(0, 0), KeyModifiers.None, clickCount: 1);
+            control.HandleSelectionMoved(control.GetCellCenter(8, 0));
+            control.HandleSelectionReleased(control.GetCellCenter(8, 0), KeyModifiers.None, clickCount: 1);
+
+            control.SimulatePointerReleased(new Point(18, 12), MouseButton.Right);
+
+            Assert.Equal("Avalonia", clipboardText);
+        });
+    }
+
+    [Fact]
+    public Task RightClickAction_CopyOrPaste_PastesWhenNothingSelected()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            control.RightClickAction = RightClickAction.CopyOrPaste;
+            control.ClipboardTextReaderOverride = () => Task.FromResult<string?>("pwd");
+
+            byte[]? sent = null;
+            model.UserInput += bytes => sent = bytes;
+
+            control.SimulatePointerReleased(new Point(18, 12), MouseButton.Right);
+
+            Assert.NotNull(sent);
+            Assert.Equal("pwd", Encoding.UTF8.GetString(sent!));
+        });
+    }
+
+    [Fact]
+    public Task RightClickAction_None_DoesNotRaiseContextRequest()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out _, out _);
+            control.RightClickAction = RightClickAction.None;
+
+            var wasRaised = false;
+            control.ContextRequested += (_, _) => wasRaised = true;
+
+            control.SimulatePointerReleased(new Point(18, 12), MouseButton.Right);
+
+            Assert.False(wasRaised);
+        });
+    }
+
+    [Fact]
+    public Task CopySelectionAsync_WritesSelectedTextToClipboard()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            string? clipboardText = null;
+            control.ClipboardTextWriterOverride = text =>
+            {
+                clipboardText = text;
+                return Task.CompletedTask;
+            };
+
+            TerminalSamples.LoadSelectionSample(model);
+            control.HandleSelectionPressed(control.GetCellCenter(0, 0), KeyModifiers.None, clickCount: 1);
+            control.HandleSelectionMoved(control.GetCellCenter(8, 0));
+            control.HandleSelectionReleased(control.GetCellCenter(8, 0), KeyModifiers.None, clickCount: 1);
+
+            control.CopySelectionAsync().GetAwaiter().GetResult();
+
+            Assert.Equal("Avalonia", clipboardText);
+        });
+    }
+
+    [Fact]
+    public Task CopySelectionAsync_NoSelection_DoesNothing()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out _, out _);
+            var clipboardText = "existing";
+            control.ClipboardTextWriterOverride = text =>
+            {
+                clipboardText = text;
+                return Task.CompletedTask;
+            };
+
+            control.CopySelectionAsync().GetAwaiter().GetResult();
+
+            Assert.Equal("existing", clipboardText);
+        });
+    }
+
+    [Fact]
+    public Task PasteFromClipboardAsync_ReadsClipboardAndSendsInput()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            control.ClipboardTextReaderOverride = () => Task.FromResult<string?>("echo hi");
+
+            byte[]? sent = null;
+            model.UserInput += bytes => sent = bytes;
+
+            control.PasteFromClipboardAsync().GetAwaiter().GetResult();
+
+            Assert.NotNull(sent);
+            Assert.Equal("echo hi", Encoding.UTF8.GetString(sent!));
         });
     }
 
@@ -351,10 +603,16 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             OnPointerWheelChanged(args);
         }
 
-        public void SimulatePointerPressed(Point point, int clickCount, KeyModifiers modifiers = KeyModifiers.None)
+        public void SimulatePointerPressed(Point point, int clickCount, MouseButton button = MouseButton.Left, KeyModifiers modifiers = KeyModifiers.None)
         {
             var pointer = new Pointer(0, PointerType.Mouse, isPrimary: true);
-            var properties = new PointerPointProperties(RawInputModifiers.LeftMouseButton, PointerUpdateKind.LeftButtonPressed);
+            var (rawModifiers, updateKind) = button switch
+            {
+                MouseButton.Middle => (RawInputModifiers.MiddleMouseButton, PointerUpdateKind.MiddleButtonPressed),
+                MouseButton.Right => (RawInputModifiers.RightMouseButton, PointerUpdateKind.RightButtonPressed),
+                _ => (RawInputModifiers.LeftMouseButton, PointerUpdateKind.LeftButtonPressed),
+            };
+            var properties = new PointerPointProperties(rawModifiers, updateKind);
             var args = new PointerPressedEventArgs(this, pointer, this, point, 0, properties, modifiers, clickCount);
             OnPointerPressed(args);
         }
@@ -368,12 +626,19 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             OnPointerMoved(args);
         }
 
-        public void SimulatePointerReleased(Point point, KeyModifiers modifiers = KeyModifiers.None)
+        public void SimulatePointerReleased(Point point, MouseButton button = MouseButton.Left, KeyModifiers modifiers = KeyModifiers.None)
         {
             var pointer = new Pointer(0, PointerType.Mouse, isPrimary: true);
-            var properties = new PointerPointProperties(RawInputModifiers.None, PointerUpdateKind.LeftButtonReleased);
-            var args = new PointerReleasedEventArgs(this, pointer, this, point, 0, properties, modifiers, MouseButton.Left);
+            var updateKind = button switch
+            {
+                MouseButton.Middle => PointerUpdateKind.MiddleButtonReleased,
+                MouseButton.Right => PointerUpdateKind.RightButtonReleased,
+                _ => PointerUpdateKind.LeftButtonReleased,
+            };
+            var properties = new PointerPointProperties(RawInputModifiers.None, updateKind);
+            var args = new PointerReleasedEventArgs(this, pointer, this, point, 0, properties, modifiers, button);
             OnPointerReleased(args);
         }
     }
+
 }
