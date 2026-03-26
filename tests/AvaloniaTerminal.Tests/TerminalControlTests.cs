@@ -30,6 +30,46 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task PointerWheel_InMouseMode_SendsWheelUpEventToTerminal()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            model.Feed("\u001b[?1006h\u001b[?1000h");
+
+            List<byte[]> sent = [];
+            model.UserInput += bytes => sent.Add(bytes.ToArray());
+
+            control.SimulatePointerWheel(new Vector(0, 1));
+
+            Assert.NotEmpty(sent);
+            Assert.Contains(sent, bytes => Encoding.UTF8.GetString(bytes).Contains("<64;", StringComparison.Ordinal));
+            Assert.Contains(sent, bytes => Encoding.UTF8.GetString(bytes).EndsWith("M", StringComparison.Ordinal));
+            Assert.Equal(0, model.ScrollOffset);
+        });
+    }
+
+    [Fact]
+    public Task PointerWheel_InMouseMode_SendsWheelDownEventToTerminal()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            model.Feed("\u001b[?1006h\u001b[?1000h");
+
+            List<byte[]> sent = [];
+            model.UserInput += bytes => sent.Add(bytes.ToArray());
+
+            control.SimulatePointerWheel(new Vector(0, -1));
+
+            Assert.NotEmpty(sent);
+            Assert.Contains(sent, bytes => Encoding.UTF8.GetString(bytes).Contains("<65;", StringComparison.Ordinal));
+            Assert.Contains(sent, bytes => Encoding.UTF8.GetString(bytes).EndsWith("M", StringComparison.Ordinal));
+            Assert.Equal(0, model.ScrollOffset);
+        });
+    }
+
+    [Fact]
     public Task Caret_TracksViewportPosition()
     {
         return RunInHeadlessSession(() =>
