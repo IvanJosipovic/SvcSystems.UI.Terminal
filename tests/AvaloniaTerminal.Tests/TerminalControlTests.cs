@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Layout;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using AvaloniaTerminal.Samples;
@@ -509,6 +510,31 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             Assert.Equal(target, model.ScrollOffset);
             Assert.Equal(target, (int)scrollBar.Value);
             Assert.True(scrollBar.IsEnabled);
+        });
+    }
+
+    [Fact]
+    public Task ScrollBar_HidesInAlternateScreenAndAutoHidesOtherwise()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out var scrollBar);
+
+            Assert.True(scrollBar.AllowAutoHide);
+            Assert.Equal(ScrollBarVisibility.Auto, scrollBar.Visibility);
+
+            model.Feed("\u001b[?1049h");
+
+            Assert.Equal(ScrollBarVisibility.Hidden, scrollBar.Visibility);
+            Assert.False(scrollBar.AllowAutoHide);
+            Assert.True(control.ColumnDefinitions[1].Width.IsAbsolute);
+            Assert.Equal(0, control.ColumnDefinitions[1].Width.Value);
+
+            model.Feed("\u001b[?1049l");
+
+            Assert.Equal(ScrollBarVisibility.Auto, scrollBar.Visibility);
+            Assert.True(scrollBar.AllowAutoHide);
+            Assert.True(control.ColumnDefinitions[1].Width.IsAuto);
         });
     }
 
