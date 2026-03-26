@@ -558,7 +558,15 @@ public partial class TerminalControl : Grid
             return;
         }
 
-        Model.HandlePointerWheel(e.Delta);
+        if (Model.IsMouseModeActive)
+        {
+            SendWheelAsMouseEvents(e.Delta, e.GetPosition(_surface));
+        }
+        else
+        {
+            Model.HandlePointerWheel(e.Delta);
+        }
+
         e.Handled = true;
     }
 
@@ -1191,6 +1199,33 @@ public partial class TerminalControl : Grid
         _verticalScrollBar.Visibility = isFullScreen ? ScrollBarVisibility.Hidden : ScrollBarVisibility.Auto;
         _verticalScrollBar.AllowAutoHide = !isFullScreen;
         InvalidateMeasure();
+    }
+
+    private void SendWheelAsMouseEvents(Vector delta, Point position)
+    {
+        if (Model == null || delta.Y == 0)
+        {
+            return;
+        }
+
+        if (!TryGetCellFromPoint(position, includeOutsideBounds: true, out var col, out var row))
+        {
+            return;
+        }
+
+        var repeats = CalculateScrollVelocity((int)Math.Ceiling(Math.Abs(delta.Y)));
+        for (var i = 0; i < repeats; i++)
+        {
+            var button = delta.Y > 0 ? 4 : 5;
+            var buttonFlags = Model.Terminal.EncodeMouseButton(
+                button,
+                release: false,
+                shift: false,
+                meta: false,
+                control: false);
+
+            Model.Terminal.SendEvent(buttonFlags, col, row);
+        }
     }
 
     private void OnVerticalScrollBarValueChanged(object? sender, RangeBaseValueChangedEventArgs e)
