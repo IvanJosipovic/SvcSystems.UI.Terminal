@@ -16,7 +16,6 @@ namespace AvaloniaTerminal;
 
 public partial class TerminalControl : Grid
 {
-    private const double ScrollBarWidth = 16;
     private static readonly TimeSpan SelectionAutoScrollInterval = TimeSpan.FromMilliseconds(80);
 
     private Size _consoleTextSize;
@@ -26,6 +25,8 @@ public partial class TerminalControl : Grid
     private readonly TerminalSurface _surface;
 
     private readonly ScrollBar _verticalScrollBar;
+
+    private readonly ColumnDefinition _scrollBarColumn;
 
     private bool _canRenderText;
 
@@ -60,8 +61,9 @@ public partial class TerminalControl : Grid
         ColumnDefinitions =
         [
             new ColumnDefinition(1, GridUnitType.Star),
-            new ColumnDefinition(ScrollBarWidth, GridUnitType.Pixel),
+            new ColumnDefinition(GridLength.Auto),
         ];
+        _scrollBarColumn = ColumnDefinitions[1];
 
         _surface = new TerminalSurface(this);
         SetColumn(_surface, 0);
@@ -71,8 +73,8 @@ public partial class TerminalControl : Grid
         {
             Orientation = Orientation.Vertical,
             SmallChange = 1,
-            Visibility = ScrollBarVisibility.Visible,
-            AllowAutoHide = false,
+            Visibility = ScrollBarVisibility.Auto,
+            AllowAutoHide = true,
         };
         SetColumn(_verticalScrollBar, 1);
         _verticalScrollBar.ValueChanged += OnVerticalScrollBarValueChanged;
@@ -1162,6 +1164,7 @@ public partial class TerminalControl : Grid
                 _verticalScrollBar.ViewportSize = 1;
                 _verticalScrollBar.LargeChange = 1;
                 _verticalScrollBar.Value = 0;
+                UpdateScrollBarLayout();
                 return;
             }
 
@@ -1172,11 +1175,22 @@ public partial class TerminalControl : Grid
             _verticalScrollBar.SmallChange = 1;
             _verticalScrollBar.LargeChange = Math.Max(Model.Terminal.Rows, 1);
             _verticalScrollBar.Value = Model.ScrollOffset;
+            UpdateScrollBarLayout();
         }
         finally
         {
             _isUpdatingScrollBar = false;
         }
+    }
+
+    private void UpdateScrollBarLayout()
+    {
+        var isFullScreen = Model?.Terminal.Buffers.IsAlternateBuffer ?? false;
+
+        _scrollBarColumn.Width = isFullScreen ? new GridLength(0) : GridLength.Auto;
+        _verticalScrollBar.Visibility = isFullScreen ? ScrollBarVisibility.Hidden : ScrollBarVisibility.Auto;
+        _verticalScrollBar.AllowAutoHide = !isFullScreen;
+        InvalidateMeasure();
     }
 
     private void OnVerticalScrollBarValueChanged(object? sender, RangeBaseValueChangedEventArgs e)
