@@ -1,5 +1,4 @@
 using Avalonia;
-using Avalonia.Collections;
 using Avalonia.Media;
 using PropertyGenerator.Avalonia;
 using System.Text;
@@ -34,8 +33,7 @@ public partial class TerminalControlModel : AvaloniaObject
     [GeneratedDirectProperty]
     public partial string Title { get; set; }
 
-    [GeneratedDirectProperty]
-    public partial Dictionary<(int x, int y), TextObject> ConsoleText { get; set; } = [];
+    internal IReadOnlyList<ViewportRow> ViewportRows { get; private set; } = [];
 
     [GeneratedDirectProperty]
     public partial string SelectedText { get; set; } = string.Empty;
@@ -191,25 +189,9 @@ public partial class TerminalControlModel : AvaloniaObject
 
         Terminal?.Resize(cols, rows);
         SearchService?.Invalidate();
-        RemoveItemsDictionary();
         UpdateDisplay();
 
         SizeChanged?.Invoke(cols, rows, width, height);
-    }
-
-    /// <summary>
-    /// Removes Items which are outside bounds Cols/Rows
-    /// </summary>
-    private void RemoveItemsDictionary()
-    {
-        var itemsToRemove = ConsoleText.Keys
-            .Where(key => key.x >= Terminal.Cols || key.y >= Terminal.Rows)
-            .ToList();
-
-        foreach (var item in itemsToRemove)
-        {
-            ConsoleText.Remove(item);
-        }
     }
 
     public void FullBufferUpdate()
@@ -531,47 +513,85 @@ public partial class TerminalControlModel : AvaloniaObject
         var viewportRows = Math.Max(Terminal.Rows, 0);
         var viewportCols = Math.Max(Terminal.Cols, 0);
         var visibleStart = Math.Clamp(buffer.YDisp, 0, Math.Max(buffer.Lines.Length - 1, 0));
+        List<ViewportRow> rows = new(viewportRows);
 
         for (var row = 0; row < viewportRows; row++)
         {
             var bufferLine = visibleStart + row;
             BufferLine? line = bufferLine < buffer.Lines.Length ? buffer.GetLine(bufferLine) : null;
-
-            for (var cell = 0; cell < viewportCols; cell++)
-            {
-                BufferCell cd = line is null ? BufferCell.Space : line[cell];
-
-                if (!ConsoleText.TryGetValue((cell, row), out TextObject? text) || text == null)
-                {
-                    text = new TextObject();
-                    ConsoleText[(cell, row)] = text;
-                }
-
-                text = SetStyling(text, cd);
-                text.Text = ConvertCharDataToText(cd);
-            }
+            rows.Add(new ViewportRow(row, BuildRowRuns(line, viewportCols)));
         }
 
-        RemoveItemsDictionary();
+        ViewportRows = rows;
     }
 
     private BufferPoint? _softSelectionStart;
 
-    private static string ConvertCharDataToText(BufferCell cd)
+    private static IReadOnlyList<ViewportTextRun> BuildRowRuns(BufferLine? line, int viewportCols)
     {
-        if (cd.CodePoint == 0 || cd.Width <= 0)
+        List<ViewportTextRun> runs = [];
+
+        for (var cell = 0; cell < viewportCols;)
+        {
+            BufferCell bufferCell = line is null ? BufferCell.Space : line[cell];
+            if (bufferCell.Width == 0)
+            {
+                cell++;
+                continue;
+            }
+
+            var styleKey = CreateStyleKey(bufferCell);
+            var startColumn = cell;
+            var cellWidth = bufferCell.Width <= 0 ? 1 : bufferCell.Width;
+            StringBuilder text = new();
+            text.Append(ConvertCellToRenderableText(bufferCell));
+            cell += cellWidth;
+
+            if (bufferCell.Width == 1)
+            {
+                while (cell < viewportCols)
+                {
+                    BufferCell nextCell = line is null ? BufferCell.Space : line[cell];
+                    if (nextCell.Width != 1 || CreateStyleKey(nextCell) != styleKey)
+                    {
+                        break;
+                    }
+
+                    text.Append(ConvertCellToRenderableText(nextCell));
+                    cell++;
+                    cellWidth++;
+                }
+            }
+
+            runs.Add(new ViewportTextRun(
+                startColumn,
+                cellWidth,
+                text.ToString(),
+                ResolveBrush(styleKey.ForegroundColor, isForeground: true),
+                ResolveBrush(styleKey.BackgroundColor, isForeground: false),
+                styleKey.Bold ? FontWeight.Bold : FontWeight.Normal,
+                styleKey.Italic ? FontStyle.Italic : FontStyle.Normal,
+                CreateTextDecorations(styleKey)));
+        }
+
+        return runs;
+    }
+
+    private static string ConvertCellToRenderableText(BufferCell cell)
+    {
+        if (cell.CodePoint == 0 || cell.Width <= 0)
         {
             return " ";
         }
 
-        if (cd.CodePoint > 0xFFFF || cd.Content.Length > 1)
+        if (cell.CodePoint > 0xFFFF || cell.Content.Length > 1)
         {
             return "\uFFFD";
         }
 
         try
         {
-            return cd.Content.Length > 0 ? cd.Content : char.ConvertFromUtf32(cd.CodePoint);
+            return cell.Content.Length > 0 ? cell.Content : char.ConvertFromUtf32(cell.CodePoint);
         }
         catch (ArgumentOutOfRangeException)
         {
@@ -579,52 +599,25 @@ public partial class TerminalControlModel : AvaloniaObject
         }
     }
 
-    private static TextObject SetStyling(TextObject control, BufferCell cd)
+    private static ViewportStyleKey CreateStyleKey(BufferCell cell)
     {
-        var attribute = cd.Attributes;
+        var attribute = cell.Attributes;
 
         int fg = attribute.GetFgColor();
         int bg = attribute.GetBgColor();
-        bool inverse = attribute.IsInverse();
 
-        if (inverse)
+        if (attribute.IsInverse())
         {
             (fg, bg) = (bg, fg);
         }
 
-        control.FontWeight = attribute.IsBold() ? FontWeight.Bold : FontWeight.Normal;
-        control.FontStyle = attribute.IsItalic() ? FontStyle.Italic : FontStyle.Normal;
-
-        if (attribute.IsUnderline())
-        {
-            control.TextDecorations = TextDecorations.Underline;
-        }
-        else if (control.TextDecorations is not null)
-        {
-            var dec = control.TextDecorations.FirstOrDefault(x => x.Location == TextDecorationLocation.Underline);
-            if (dec != null)
-            {
-                control.TextDecorations.Remove(dec);
-            }
-        }
-
-        if (attribute.IsStrikethrough())
-        {
-            control.TextDecorations = TextDecorations.Strikethrough;
-        }
-        else if (control.TextDecorations is not null)
-        {
-            var dec = control.TextDecorations.FirstOrDefault(x => x.Location == TextDecorationLocation.Strikethrough);
-            if (dec != null)
-            {
-                control.TextDecorations.Remove(dec);
-            }
-        }
-
-        control.Foreground = ResolveBrush(fg, isForeground: true);
-        control.Background = ResolveBrush(bg, isForeground: false);
-
-        return control;
+        return new ViewportStyleKey(
+            fg,
+            bg,
+            attribute.IsBold(),
+            attribute.IsItalic(),
+            attribute.IsUnderline(),
+            attribute.IsStrikethrough());
     }
 
     private static IBrush ResolveBrush(int color, bool isForeground)
@@ -649,25 +642,44 @@ public partial class TerminalControlModel : AvaloniaObject
         var blue = (byte)(color & 0xFF);
         return new SolidColorBrush(Color.FromRgb(red, green, blue));
     }
+
+    private static TextDecorationCollection? CreateTextDecorations(ViewportStyleKey styleKey)
+    {
+        TextDecorationCollection? decorations = null;
+        if (styleKey.Underline)
+        {
+            decorations = new TextDecorationCollection(TextDecorations.Underline);
+        }
+
+        if (styleKey.Strikethrough)
+        {
+            decorations ??= [];
+            decorations.Add(new TextDecoration
+            {
+                Location = TextDecorationLocation.Strikethrough,
+            });
+        }
+
+        return decorations;
+    }
 }
 
-public partial class TextObject : AvaloniaObject
-{
-    [GeneratedStyledProperty]
-    public partial IBrush Foreground { get; set; }
+internal readonly record struct ViewportRow(int RowIndex, IReadOnlyList<ViewportTextRun> Runs);
 
-    [GeneratedStyledProperty]
-    public partial IBrush Background { get; set; }
+internal readonly record struct ViewportTextRun(
+    int StartColumn,
+    int CellWidth,
+    string Text,
+    IBrush Foreground,
+    IBrush Background,
+    FontWeight FontWeight,
+    FontStyle FontStyle,
+    TextDecorationCollection? TextDecorations);
 
-    [GeneratedStyledProperty]
-    public partial string Text { get; set; }
-
-    [GeneratedStyledProperty]
-    public partial FontWeight FontWeight { get; set; }
-
-    [GeneratedStyledProperty]
-    public partial FontStyle FontStyle { get; set; }
-
-    [GeneratedStyledProperty]
-    public partial TextDecorationCollection? TextDecorations { get; set; }
-}
+internal readonly record struct ViewportStyleKey(
+    int ForegroundColor,
+    int BackgroundColor,
+    bool Bold,
+    bool Italic,
+    bool Underline,
+    bool Strikethrough);

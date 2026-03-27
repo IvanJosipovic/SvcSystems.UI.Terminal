@@ -136,6 +136,20 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task CaretBrush_UsesContrastingColorWhenCellForegroundMatchesBackground()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            model.Feed("\u001b[38;2;255;255;255;48;2;255;255;255mA\b");
+
+            var brush = Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(control.CaretBrushForTests);
+
+            Assert.Equal(Avalonia.Media.Colors.Black, brush.Color);
+        });
+    }
+
+    [Fact]
     public Task DragSelection_UpdatesSelectedTextAndControlBinding()
     {
         return RunInHeadlessSession(() =>

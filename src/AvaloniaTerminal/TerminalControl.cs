@@ -9,6 +9,7 @@ using Avalonia.Media.TextFormatting;
 using System.Globalization;
 using System.Threading.Tasks;
 using Avalonia.Threading;
+using XTerm.Buffer;
 using Point = Avalonia.Point;
 using AvaloniaModifiers = Avalonia.Input.KeyModifiers;
 using XKey = XTerm.Input.Key;
@@ -23,6 +24,7 @@ public partial class TerminalControl : Grid
 {
     private static readonly TimeSpan SelectionAutoScrollInterval = TimeSpan.FromMilliseconds(80);
     private static readonly Brush[] FallbackXtermPalette = CreateFallbackXtermPalette();
+    private const int MaxFormattedTextCacheEntries = 16384;
 
     private Size _consoleTextSize;
 
@@ -59,6 +61,8 @@ public partial class TerminalControl : Grid
     private bool _hasSelection;
 
     private readonly DispatcherTimer _selectionAutoScrollTimer;
+    private readonly Dictionary<FormattedTextCacheKey, FormattedText> _formattedTextCache = [];
+    private readonly Queue<FormattedTextCacheKey> _formattedTextCacheOrder = [];
 
     public TerminalControl()
     {
@@ -276,6 +280,7 @@ public partial class TerminalControl : Grid
         if (change.Property == FontFamilyProperty || change.Property == FontSizeProperty)
         {
             CalculateTextSize();
+            ClearFormattedTextCache();
             ResizeModelToViewport();
             _surface.InvalidateVisual();
         }
@@ -753,6 +758,8 @@ public partial class TerminalControl : Grid
 
     internal Rect CaretRect => TryGetCaretRect(out var rect) ? rect : default;
 
+    internal IBrush CaretBrushForTests => ResolveCaretBrush();
+
     internal Point GetCellCenter(int col, int row)
     {
         return new Point(
@@ -1181,6 +1188,7 @@ public partial class TerminalControl : Grid
         var viewport = _surface.Bounds;
         Model.Resize(viewport.Width, viewport.Height, _consoleTextSize.Width, _consoleTextSize.Height);
         UpdateScrollBar();
+        _surface.InvalidateVisual();
     }
 
     private void UpdateScrollBar()
@@ -1426,27 +1434,22 @@ public partial class TerminalControl : Grid
                 return;
             }
 
-            foreach (var item in owner.Model.ConsoleText)
+            foreach (var row in owner.Model.ViewportRows)
             {
-                var cellRect = new Rect(
-                    owner._consoleTextSize.Width * item.Key.x,
-                    owner._consoleTextSize.Height * item.Key.y,
-                    owner._consoleTextSize.Width + 1,
-                    owner._consoleTextSize.Height + 1);
-                context.FillRectangle(item.Value.Background, cellRect);
-
-                if (owner._canRenderText)
+                foreach (var run in row.Runs)
                 {
-                    var formattedText = new FormattedText(item.Value.Text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, owner._typeface, owner.FontSize, item.Value.Foreground);
-                    if (item.Value.TextDecorations != null)
+                    var runRect = new Rect(
+                        owner._consoleTextSize.Width * run.StartColumn,
+                        owner._consoleTextSize.Height * row.RowIndex,
+                        owner._consoleTextSize.Width * run.CellWidth,
+                        owner._consoleTextSize.Height + 1);
+                    context.FillRectangle(run.Background, runRect);
+
+                    if (owner._canRenderText)
                     {
-                        formattedText.SetTextDecorations(item.Value.TextDecorations);
+                        var formattedText = owner.GetOrCreateFormattedText(run);
+                        context.DrawText(formattedText, new Point(owner._consoleTextSize.Width * run.StartColumn, owner._consoleTextSize.Height * row.RowIndex));
                     }
-
-                    formattedText.SetFontWeight(item.Value.FontWeight);
-                    formattedText.SetFontStyle(item.Value.FontStyle);
-
-                    context.DrawText(formattedText, new Point(owner._consoleTextSize.Width * item.Key.x, owner._consoleTextSize.Height * item.Key.y));
                 }
             }
 
@@ -1565,24 +1568,148 @@ public partial class TerminalControl : Grid
             return CaretBrush;
         }
 
-        if (Model is not null &&
-            Model.ConsoleText.TryGetValue((Model.CaretColumn, Model.CaretRow), out var caretCell))
+        if (TryGetCaretColors(out var foregroundColor, out var backgroundColor))
         {
-            if (caretCell.Foreground is ISolidColorBrush foreground &&
-                caretCell.Background is ISolidColorBrush background)
-            {
-                return ColorsAreClose(foreground.Color, background.Color)
-                    ? CreateContrastingBrush(background.Color)
-                    : foreground;
-            }
-
-            if (caretCell.Foreground is not null)
-            {
-                return caretCell.Foreground;
-            }
+            return ColorsAreClose(foregroundColor, backgroundColor)
+                ? CreateContrastingBrush(backgroundColor)
+                : new SolidColorBrush(foregroundColor);
         }
 
         return ConvertXtermColor(15);
+    }
+
+    private bool TryGetCaretColors(out Color foreground, out Color background)
+    {
+        foreground = Colors.White;
+        background = Colors.Black;
+
+        if (Model == null || !TryGetCaretBufferCell(out var cell))
+        {
+            return false;
+        }
+
+        var attribute = cell.Attributes;
+        var fg = attribute.GetFgColor();
+        var bg = attribute.GetBgColor();
+        if (attribute.IsInverse())
+        {
+            (fg, bg) = (bg, fg);
+        }
+
+        if (ResolveColorBrush(fg, isForeground: true) is not ISolidColorBrush foregroundBrush ||
+            ResolveColorBrush(bg, isForeground: false) is not ISolidColorBrush backgroundBrush)
+        {
+            return false;
+        }
+
+        foreground = foregroundBrush.Color;
+        background = backgroundBrush.Color;
+        return true;
+    }
+
+    private bool TryGetCaretBufferCell(out BufferCell cell)
+    {
+        cell = BufferCell.Space;
+        if (Model == null)
+        {
+            return false;
+        }
+
+        var buffer = Model.Terminal.Buffer;
+        var absoluteRow = Math.Clamp(buffer.YDisp + Model.CaretRow, 0, Math.Max(buffer.Lines.Length - 1, 0));
+        var line = absoluteRow < buffer.Lines.Length ? buffer.GetLine(absoluteRow) : null;
+        if (line == null || Model.CaretColumn >= line.Length)
+        {
+            return false;
+        }
+
+        cell = line[Model.CaretColumn];
+        return true;
+    }
+
+    private static Brush ResolveColorBrush(int color, bool isForeground)
+    {
+        if (color == 256 || color == 257)
+        {
+            return ConvertXtermColor(isForeground ? 15 : 0);
+        }
+
+        if (color is >= 0 and <= 255)
+        {
+            return ConvertXtermColor(color);
+        }
+
+        var red = (byte)((color >> 16) & 0xFF);
+        var green = (byte)((color >> 8) & 0xFF);
+        var blue = (byte)(color & 0xFF);
+        return new SolidColorBrush(Color.FromRgb(red, green, blue));
+    }
+
+    private FormattedText GetOrCreateFormattedText(ViewportTextRun run)
+    {
+        var cacheKey = new FormattedTextCacheKey(
+            run.Text,
+            run.Foreground,
+            run.FontWeight,
+            run.FontStyle,
+            GetTextDecorationFlags(run.TextDecorations));
+
+        if (_formattedTextCache.TryGetValue(cacheKey, out var cached))
+        {
+            return cached;
+        }
+
+        EvictFormattedTextCacheEntriesIfNeeded();
+
+        var formattedText = new FormattedText(run.Text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, _typeface, FontSize, run.Foreground);
+        if (run.TextDecorations != null)
+        {
+            formattedText.SetTextDecorations(run.TextDecorations);
+        }
+
+        formattedText.SetFontWeight(run.FontWeight);
+        formattedText.SetFontStyle(run.FontStyle);
+        _formattedTextCache[cacheKey] = formattedText;
+        _formattedTextCacheOrder.Enqueue(cacheKey);
+        return formattedText;
+    }
+
+    private void EvictFormattedTextCacheEntriesIfNeeded()
+    {
+        while (_formattedTextCache.Count >= MaxFormattedTextCacheEntries && _formattedTextCacheOrder.Count > 0)
+        {
+            var oldestKey = _formattedTextCacheOrder.Dequeue();
+            _formattedTextCache.Remove(oldestKey);
+        }
+    }
+
+    private void ClearFormattedTextCache()
+    {
+        _formattedTextCache.Clear();
+        _formattedTextCacheOrder.Clear();
+    }
+
+    private static TextDecorationFlags GetTextDecorationFlags(TextDecorationCollection? decorations)
+    {
+        if (decorations is null || decorations.Count == 0)
+        {
+            return TextDecorationFlags.None;
+        }
+
+        TextDecorationFlags flags = TextDecorationFlags.None;
+        foreach (var decoration in decorations)
+        {
+            flags |= decoration.Location switch
+            {
+                TextDecorationLocation.Underline => TextDecorationFlags.Underline,
+                TextDecorationLocation.Strikethrough => TextDecorationFlags.Strikethrough,
+                TextDecorationLocation.Overline => TextDecorationFlags.Overline,
+                TextDecorationLocation.Baseline => TextDecorationFlags.Baseline,
+                _ => TextDecorationFlags.None,
+            };
+        }
+
+        return flags;
     }
 
     private static bool ColorsAreClose(Avalonia.Media.Color left, Avalonia.Media.Color right)
@@ -1607,4 +1734,21 @@ public partial class TerminalControl : Grid
     }
 
     internal int SelectionAutoScrollDeltaForTests => _selectionAutoScrollDelta;
+}
+
+internal readonly record struct FormattedTextCacheKey(
+    string Text,
+    IBrush Foreground,
+    FontWeight FontWeight,
+    FontStyle FontStyle,
+    TextDecorationFlags TextDecorations);
+
+[Flags]
+internal enum TextDecorationFlags
+{
+    None = 0,
+    Underline = 1 << 0,
+    Strikethrough = 1 << 1,
+    Overline = 1 << 2,
+    Baseline = 1 << 3,
 }
