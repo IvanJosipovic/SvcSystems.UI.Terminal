@@ -9,6 +9,7 @@ Avalonia terminal control built on top of [XTerm.NET](https://github.com/tomlm/X
 ## Features
 
 - Terminal rendering backed by `XTerm.NET`
+- Standalone `Terminal` wrapper for direct engine integration
 - Scrollback with mouse wheel, scrollbar, `PageUp`, and `PageDown`
 - Caret rendering with theme-aware default styling
 - Text selection with drag, double-click word selection, triple-click row selection, and drag auto-scroll
@@ -60,11 +61,13 @@ public partial class MainWindow : Window
 }
 ```
 
-You can also pass `TerminalOptions` when you need non-default terminal behavior:
+You can also pass `AvaloniaTerminal.TerminalOptions` when you need non-default terminal behavior:
 
 ```csharp
 var model = new TerminalControlModel(new TerminalOptions
 {
+    Cols = 120,
+    Rows = 30,
     ReflowOnResize = false,
 });
 ```
@@ -128,14 +131,28 @@ _ = Task.Run(async () =>
 - `Feed(string)` / `Feed(byte[], int)` for terminal output
 - `Send(string)` / `Send(byte[])` for programmatic input
 - `ScrollLines(int)`, `PageUp()`, `PageDown()`, `ScrollToYDisp(int)`
+- `ScrollToPosition(double)`, `EnsureCaretIsVisible()`
+- `StartSelection(int, int)`, `StartSelectionFromSoftStart()`, `SetSoftSelectionStart(int, int)`
+- `DragExtendSelection(int, int)`, `ShiftExtendSelection(int, int)`
+- `SelectWordOrExpression(int, int)`, `SelectRow(int)`, `SelectAll()`, `ClearSelection()`
 - `Search(string)`, `SelectNextSearchResult()`, `SelectPreviousSearchResult()`
-- `SelectAll()`, `ClearSelection()`
 - `SelectedText`, `HasSelection`
-- `ScrollOffset`, `MaxScrollback`
+- `Title`
+- `ScrollOffset`, `MaxScrollback`, `ScrollPosition`, `ScrollThumbsize`, `CanScroll`
 - `CaretColumn`, `CaretRow`, `IsCaretVisible`
 - `IsMouseModeActive`
 - `SizeChanged`
-- `Terminal`, `SelectionService`, `SearchService`
+- `Terminal`, `SearchService`
+- `OptionAsMetaKey`
+
+`Terminal`:
+
+- `Feed(string)` / `Feed(byte[], int)` for terminal output
+- `Resize(int, int)`
+- `SwitchToAltBuffer()`, `SwitchToNormalBuffer()`
+- `TitleChanged`
+- `Engine`, `Buffer`, `Selection`, `IsAlternateBufferActive`
+- `Cols`, `Rows`, `Title`
 
 `TerminalControl`:
 
@@ -156,6 +173,8 @@ _ = Task.Run(async () =>
 
 `TerminalOptions` used by `TerminalControlModel`:
 
+- `Cols`
+- `Rows`
 - `Scrollback`
 - `ConvertEol`
 - `TabStopWidth`
