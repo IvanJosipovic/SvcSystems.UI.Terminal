@@ -1,4 +1,5 @@
 using Avalonia.Media;
+using AvaloniaTerminal;
 using AvaloniaTerminal.Samples;
 using Xunit;
 
@@ -14,10 +15,10 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
             var model = new TerminalControlModel();
 
             Assert.NotNull(model.Terminal);
-            Assert.NotNull(model.SelectionService);
             Assert.NotNull(model.SearchService);
-            Assert.Equal(model.Terminal.Cols * model.Terminal.Rows, model.ConsoleText.Count);
-            Assert.Equal(" ", model.ConsoleText[(0, 0)].Text);
+            Assert.Equal(model.Terminal.Rows, model.ViewportRows.Count);
+            Assert.Equal(model.Terminal.Cols, model.ViewportRows[0].Runs.Sum(static run => run.CellWidth));
+            Assert.Equal(" ", GetCellText(model, 0, 0));
             Assert.False(model.CanScroll);
             Assert.Equal(0d, model.ScrollPosition);
             Assert.Equal(1f, model.ScrollThumbsize);
@@ -91,7 +92,7 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
             model.UpdateUI = () => refreshCount++;
 
             model.Feed("\u001b[1;3;4;31;47mA");
-            var cell = model.ConsoleText[(0, 0)];
+            var cell = GetRun(model, 0, 0);
 
             Assert.Equal("A", cell.Text);
             Assert.Equal(FontWeight.Bold, cell.FontWeight);
@@ -100,6 +101,22 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
             Assert.Equal(Color.Parse("#800000"), AssertBrush(cell.Foreground).Color);
             Assert.Equal(Color.Parse("#C0C0C0"), AssertBrush(cell.Background).Color);
             Assert.Equal(1, refreshCount);
+        });
+    }
+
+    [Fact]
+    public Task Feed_DefaultStylingUsesWhiteOnBlack()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+
+            model.Feed("A");
+
+            var cell = GetRun(model, 0, 0);
+
+            Assert.Equal(Color.Parse("#FFFFFF"), AssertBrush(cell.Foreground).Color);
+            Assert.Equal(Color.Parse("#000000"), AssertBrush(cell.Background).Color);
         });
     }
 
@@ -125,7 +142,7 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
 
             model.Feed("😀");
 
-            var text = model.ConsoleText[(0, 0)].Text;
+            var text = GetCellText(model, 0, 0);
             Assert.False(string.IsNullOrEmpty(text));
             Assert.DoesNotContain(text, static ch => char.IsSurrogate(ch));
         });
@@ -140,9 +157,9 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
 
             model.Feed("│A");
 
-            Assert.Equal("│", model.ConsoleText[(0, 0)].Text);
-            Assert.Equal("A", model.ConsoleText[(1, 0)].Text);
-            Assert.Equal(" ", model.ConsoleText[(2, 0)].Text);
+            Assert.Equal("│", GetCellText(model, 0, 0));
+            Assert.Equal("A", GetCellText(model, 1, 0));
+            Assert.Equal(" ", GetCellText(model, 2, 0));
         });
     }
 
@@ -168,7 +185,7 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
     }
 
     [Fact]
-    public Task SelectionProperties_ReflectSelectionServiceText()
+    public Task SelectionProperties_ReflectEngineSelectionText()
     {
         return RunInHeadlessSession(() =>
         {
@@ -245,14 +262,14 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
             Assert.Equal(1d, model.ScrollPosition);
             Assert.InRange(model.ScrollThumbsize, 0.01f, 0.99f);
 
-            model.Terminal.ScrollLines(-1);
+            model.Terminal.Engine.ScrollLines(-1);
 
             Assert.InRange(model.ScrollPosition, 0d, 0.99d);
         });
     }
 
     [Fact]
-    public Task Scrolling_KeepsRenderedCellCacheBoundedToViewport()
+    public Task Scrolling_KeepsRenderedRunCoverageBoundedToViewport()
     {
         return RunInHeadlessSession(() =>
         {
@@ -262,15 +279,15 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
 
             var viewportCellCount = model.Terminal.Cols * model.Terminal.Rows;
 
-            Assert.Equal(viewportCellCount, model.ConsoleText.Count);
+            Assert.Equal(viewportCellCount, GetViewportCoverage(model));
 
             model.ScrollToYDisp(model.MaxScrollback / 2);
 
-            Assert.Equal(viewportCellCount, model.ConsoleText.Count);
+            Assert.Equal(viewportCellCount, GetViewportCoverage(model));
 
             model.ScrollToYDisp(model.MaxScrollback);
 
-            Assert.Equal(viewportCellCount, model.ConsoleText.Count);
+            Assert.Equal(viewportCellCount, GetViewportCoverage(model));
         });
     }
 
@@ -283,7 +300,7 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
             model.Resize(width: 40, height: 30, textWidth: 10, textHeight: 10);
             model.Feed("1\r\n2\r\n3\r\n4\r\n5\r\n6");
 
-            model.Terminal.Buffers.ActivateAltBuffer(null);
+            model.Terminal.SwitchToAltBuffer();
 
             Assert.False(model.CanScroll);
             Assert.Equal(0d, model.ScrollPosition);
@@ -296,7 +313,7 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
     {
         return RunInHeadlessSession(() =>
         {
-            var model = new TerminalControlModel(new XtermSharp.TerminalOptions
+            var model = new TerminalControlModel(new TerminalOptions
             {
                 Cols = 10,
                 Rows = 4,
@@ -305,8 +322,71 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
             model.Feed("1111\r\n2222\r\n3333\r\n4444");
             model.Feed("\u001b[1FZ");
 
-            Assert.Equal("Z", model.ConsoleText[(0, 2)].Text);
-            Assert.Equal("4", model.ConsoleText[(0, 3)].Text);
+            Assert.Equal("Z", GetCellText(model, 0, 2));
+            Assert.Equal("4", GetCellText(model, 0, 3));
+        });
+    }
+
+    [Fact]
+    public Task Feed_AdjacentSameStyleAsciiCellsCollapseIntoSingleRun()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+
+            model.Feed("ABC");
+
+            var row = model.ViewportRows[0];
+            var firstRun = row.Runs[0];
+            Assert.Equal(0, firstRun.StartColumn);
+            Assert.StartsWith("ABC", firstRun.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain(row.Runs, run => run.StartColumn is 1 or 2);
+        });
+    }
+
+    [Fact]
+    public Task Feed_StyleChangeSplitsRuns()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+
+            model.Feed("A\u001b[31mB");
+
+            var row = model.ViewportRows[0];
+            Assert.Contains(row.Runs, run => run.StartColumn == 0 && run.CellWidth == 1 && run.Text == "A");
+            Assert.Contains(row.Runs, run => run.StartColumn == 1 && run.CellWidth == 1 && run.Text == "B");
+        });
+    }
+
+    [Fact]
+    public Task Feed_WideCharacterProducesSingleWidthTwoRun()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+
+            model.Feed("好A");
+
+            var row = model.ViewportRows[0];
+            Assert.Contains(row.Runs, run => run.StartColumn == 0 && run.CellWidth == 2);
+            Assert.Equal(" ", GetCellText(model, 1, 0));
+            Assert.Equal("A", GetCellText(model, 2, 0));
+        });
+    }
+
+    [Fact]
+    public Task Feed_InverseDefaultColorsStayReadable()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+
+            model.Feed("\u001b[7mA");
+
+            var run = GetRun(model, 0, 0);
+            Assert.Equal(Color.Parse("#FFFFFF"), AssertBrush(run.Foreground).Color);
+            Assert.Equal(Color.Parse("#000000"), AssertBrush(run.Background).Color);
         });
     }
 
@@ -315,7 +395,7 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
     {
         return RunInHeadlessSession(() =>
         {
-            var model = new TerminalControlModel(new XtermSharp.TerminalOptions
+            var model = new TerminalControlModel(new TerminalOptions
             {
                 Cols = 10,
                 Rows = 4,
@@ -334,5 +414,41 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
     private static SolidColorBrush AssertBrush(IBrush brush)
     {
         return Assert.IsType<SolidColorBrush>(brush);
+    }
+
+    private static int GetViewportCoverage(TerminalControlModel model)
+    {
+        return model.ViewportRows.Sum(static row => row.Runs.Sum(static run => run.CellWidth));
+    }
+
+    private static ViewportTextRun GetRun(TerminalControlModel model, int col, int row)
+    {
+        var viewportRow = model.ViewportRows[row];
+        foreach (var run in viewportRow.Runs)
+        {
+            if (col >= run.StartColumn && col < run.StartColumn + run.CellWidth)
+            {
+                return run;
+            }
+        }
+
+        throw new InvalidOperationException($"No run found at ({col}, {row}).");
+    }
+
+    private static string GetCellText(TerminalControlModel model, int col, int row)
+    {
+        var run = GetRun(model, col, row);
+        var offset = col - run.StartColumn;
+        if (run.CellWidth == 2 && offset == 1)
+        {
+            return " ";
+        }
+
+        if (offset < 0 || offset >= run.Text.Length)
+        {
+            return " ";
+        }
+
+        return run.Text[offset].ToString();
     }
 }

@@ -1,7 +1,7 @@
 using Avalonia.Controls;
+using AvaloniaTerminal;
 using Avalonia.Threading;
 using System.Diagnostics;
-using XtermSharp;
 
 namespace AvaloniaTerminal.Samples;
 

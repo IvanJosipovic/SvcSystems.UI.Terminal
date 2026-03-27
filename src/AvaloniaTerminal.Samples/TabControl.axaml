@@ -9,9 +9,6 @@
     d:DesignHeight="200"
     d:DesignWidth="400"
     mc:Ignorable="d">
-    <Window.Styles>
-        <StyleInclude Source="avares://AvaloniaTerminal/Styles/Colors.axaml" />
-    </Window.Styles>
     <TabControl>
         <TabItem Header="Shell">
             <samples:ShellControl />

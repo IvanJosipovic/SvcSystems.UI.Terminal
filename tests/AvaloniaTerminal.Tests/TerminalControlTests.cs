@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Layout;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using AvaloniaTerminal;
 using AvaloniaTerminal.Samples;
 using System.Text;
 using Xunit;
@@ -103,6 +104,48 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             model.ScrollToYDisp(0);
 
             Assert.False(control.HasVisibleCaret);
+        });
+    }
+
+    [Fact]
+    public Task InvalidFontFamily_FallsBackToADrawableTypeface()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out _, out _);
+
+            control.FontFamily = "__missing_font_family__";
+
+            Assert.True(control.CanRenderTextForTests);
+        });
+    }
+
+    [Fact]
+    public Task ApplicationResourcePaletteOverride_DoesNotAffectTerminalPalette()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var application = Avalonia.Application.Current ?? throw new InvalidOperationException("No application is running.");
+            application.Resources["AvaloniaTerminalColor15"] = Avalonia.Media.Brushes.Black;
+
+            var brush = TerminalControl.ConvertXtermColor(15);
+
+            var solid = Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(brush);
+            Assert.Equal(Avalonia.Media.Colors.White, solid.Color);
+        });
+    }
+
+    [Fact]
+    public Task CaretBrush_UsesContrastingColorWhenCellForegroundMatchesBackground()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            model.Feed("\u001b[38;2;255;255;255;48;2;255;255;255mA\b");
+
+            var brush = Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(control.CaretBrushForTests);
+
+            Assert.Equal(Avalonia.Media.Colors.Black, brush.Color);
         });
     }
 
@@ -612,6 +655,69 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             Assert.True(before >= 0);
             Assert.Equal(Math.Min(model.MaxScrollback, before + model.Terminal.Rows), model.ScrollOffset);
             Assert.Equal(model.ScrollOffset, (int)scrollBar.Value);
+        });
+    }
+
+    [Fact]
+    public Task SpecialKeys_UseEngineGeneratedSequencesInNormalMode()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            var sent = new List<byte[]>();
+            model.UserInput += bytes => sent.Add(bytes.ToArray());
+
+            control.SimulateKeyUp(Key.Up);
+            control.SimulateKeyUp(Key.Delete);
+            control.SimulateKeyUp(Key.OemBackTab);
+            control.SimulateKeyUp(Key.F10);
+
+            var payloads = sent.Select(Encoding.UTF8.GetString).ToArray();
+
+            Assert.Contains("\u001b[A", payloads);
+            Assert.Contains("\u001b[3~", payloads);
+            Assert.Contains("\u001b[Z", payloads);
+            Assert.Contains("\u001b[21~", payloads);
+        });
+    }
+
+    [Fact]
+    public Task ArrowKeys_UseEngineApplicationCursorSequencesWhenEnabled()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            var sent = new List<byte[]>();
+            model.UserInput += bytes => sent.Add(bytes.ToArray());
+
+            model.Feed("\u001b[?1h");
+            control.SimulateKeyUp(Key.Up);
+            control.SimulateKeyUp(Key.Home);
+
+            var payloads = sent.Select(Encoding.UTF8.GetString).ToArray();
+
+            Assert.Contains("\u001bOA", payloads);
+            Assert.Contains("\u001b[H", payloads);
+        });
+    }
+
+    [Fact]
+    public Task PageKeys_UseEngineSequencesWhenApplicationCursorEnabled()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            var sent = new List<byte[]>();
+            model.UserInput += bytes => sent.Add(bytes.ToArray());
+
+            model.Feed("\u001b[?1h");
+            control.SimulateKeyUp(Key.PageUp);
+            control.SimulateKeyUp(Key.PageDown);
+
+            var payloads = sent.Select(Encoding.UTF8.GetString).ToArray();
+
+            Assert.Contains("\u001b[5~", payloads);
+            Assert.Contains("\u001b[6~", payloads);
         });
     }
 
