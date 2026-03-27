@@ -11,8 +11,10 @@ using System.Threading.Tasks;
 using Avalonia.Threading;
 using Point = Avalonia.Point;
 using AvaloniaModifiers = Avalonia.Input.KeyModifiers;
+using XKey = XTerm.Input.Key;
 using XMouseButton = XTerm.Input.MouseButton;
 using XMouseEventType = XTerm.Input.MouseEventType;
+using XMouseTrackingMode = XTerm.Input.MouseTrackingMode;
 using XTermModifiers = XTerm.Input.KeyModifiers;
 
 namespace AvaloniaTerminal;
@@ -455,34 +457,10 @@ public partial class TerminalControl : Grid
         {
             switch (e.Key)
             {
-                case Key.Escape:
-                    Model.Send([0x1b]);
-                    break;
-                case Key.Space:
-                    Model.Send([0x20]);
-                    break;
-                case Key.Delete:
-                    Model.Send(EscapeSequences.CmdDelKey);
-                    break;
-                case Key.Back:
-                    Model.Send([0x7f]);
-                    break;
-                case Key.Up:
-                    Model.Send(Model.Terminal.ApplicationCursor ? EscapeSequences.MoveUpApp : EscapeSequences.MoveUpNormal);
-                    break;
-                case Key.Down:
-                    Model.Send(Model.Terminal.ApplicationCursor ? EscapeSequences.MoveDownApp : EscapeSequences.MoveDownNormal);
-                    break;
-                case Key.Left:
-                    Model.Send(Model.Terminal.ApplicationCursor ? EscapeSequences.MoveLeftApp : EscapeSequences.MoveLeftNormal);
-                    break;
-                case Key.Right:
-                    Model.Send(Model.Terminal.ApplicationCursor ? EscapeSequences.MoveRightApp : EscapeSequences.MoveRightNormal);
-                    break;
                 case Key.PageUp:
-                    if (Model.Terminal.ApplicationCursor)
+                    if (Model.Terminal.Engine.ApplicationCursorKeys)
                     {
-                        Model.Send(EscapeSequences.CmdPageUp);
+                        SendGeneratedKey(XKey.PageUp);
                     }
                     else
                     {
@@ -490,60 +468,23 @@ public partial class TerminalControl : Grid
                     }
                     break;
                 case Key.PageDown:
-                    if (Model.Terminal.ApplicationCursor)
+                    if (Model.Terminal.Engine.ApplicationCursorKeys)
                     {
-                        Model.Send(EscapeSequences.CmdPageDown);
+                        SendGeneratedKey(XKey.PageDown);
                     }
                     else
                     {
                         Model.PageDown();
                     }
                     break;
-                case Key.Home:
-                    Model.Send(Model.Terminal.ApplicationCursor ? EscapeSequences.MoveHomeApp : EscapeSequences.MoveHomeNormal);
-                    break;
-                case Key.End:
-                    Model.Send(Model.Terminal.ApplicationCursor ? EscapeSequences.MoveEndApp : EscapeSequences.MoveEndNormal);
-                    break;
                 case Key.Insert:
                     break;
-                case Key.F1:
-                    Model.Send(EscapeSequences.CmdF[0]);
-                    break;
-                case Key.F2:
-                    Model.Send(EscapeSequences.CmdF[1]);
-                    break;
-                case Key.F3:
-                    Model.Send(EscapeSequences.CmdF[2]);
-                    break;
-                case Key.F4:
-                    Model.Send(EscapeSequences.CmdF[3]);
-                    break;
-                case Key.F5:
-                    Model.Send(EscapeSequences.CmdF[4]);
-                    break;
-                case Key.F6:
-                    Model.Send(EscapeSequences.CmdF[5]);
-                    break;
-                case Key.F7:
-                    Model.Send(EscapeSequences.CmdF[6]);
-                    break;
-                case Key.F8:
-                    Model.Send(EscapeSequences.CmdF[7]);
-                    break;
-                case Key.F9:
-                    Model.Send(EscapeSequences.CmdF[8]);
-                    break;
-                case Key.F10:
-                    Model.Send(EscapeSequences.CmdF[9]);
-                    break;
-                case Key.OemBackTab:
-                    Model.Send(EscapeSequences.CmdBackTab);
-                    break;
-                case Key.Tab:
-                    Model.Send(EscapeSequences.CmdTab);
-                    break;
                 default:
+                    if (TrySendGeneratedKey(e.Key))
+                    {
+                        break;
+                    }
+
                     if (!string.IsNullOrEmpty(e.KeySymbol))
                     {
                         Model.Send(e.KeySymbol);
@@ -941,7 +882,7 @@ public partial class TerminalControl : Grid
 
     private bool TryHandleTerminalMousePressed(PointerPressedEventArgs e)
     {
-        if (Model == null || !Model.IsMouseModeActive || !ShouldSendTerminalMousePress(Model.Terminal.MouseMode))
+        if (Model == null || !Model.IsMouseModeActive || !ShouldSendTerminalMousePress(Model.Terminal.Engine.MouseTrackingMode))
         {
             return false;
         }
@@ -972,11 +913,11 @@ public partial class TerminalControl : Grid
             return false;
         }
 
-        var mode = Model.Terminal.MouseMode;
+        var mode = Model.Terminal.Engine.MouseTrackingMode;
         var props = e.GetCurrentPoint(_surface).Properties;
         var hasPressedButton = props.IsLeftButtonPressed || props.IsMiddleButtonPressed || props.IsRightButtonPressed;
 
-        var shouldSendMotion = mode.SendMotionEvent() || (mode.SendButtonTracking() && hasPressedButton);
+        var shouldSendMotion = mode == XMouseTrackingMode.AnyEvent || (mode == XMouseTrackingMode.ButtonEvent && hasPressedButton);
         if (!shouldSendMotion)
         {
             return false;
@@ -1012,7 +953,7 @@ public partial class TerminalControl : Grid
             return false;
         }
 
-        if (!ShouldSendTerminalMouseRelease(Model.Terminal.MouseMode))
+        if (!ShouldSendTerminalMouseRelease(Model.Terminal.Engine.MouseTrackingMode))
         {
             _activeTerminalMouseButton = 0;
             return true;
@@ -1029,14 +970,14 @@ public partial class TerminalControl : Grid
         return true;
     }
 
-    private static bool ShouldSendTerminalMousePress(MouseMode mode)
+    private static bool ShouldSendTerminalMousePress(XMouseTrackingMode mode)
     {
-        return mode == MouseMode.X10 || mode == MouseMode.VT200 || mode == MouseMode.ButtonEventTracking || mode == MouseMode.AnyEvent;
+        return mode == XMouseTrackingMode.X10 || mode == XMouseTrackingMode.VT200 || mode == XMouseTrackingMode.ButtonEvent || mode == XMouseTrackingMode.AnyEvent;
     }
 
-    private static bool ShouldSendTerminalMouseRelease(MouseMode mode)
+    private static bool ShouldSendTerminalMouseRelease(XMouseTrackingMode mode)
     {
-        return mode == MouseMode.VT200 || mode == MouseMode.ButtonEventTracking || mode == MouseMode.AnyEvent;
+        return mode == XMouseTrackingMode.VT200 || mode == XMouseTrackingMode.ButtonEvent || mode == XMouseTrackingMode.AnyEvent;
     }
 
     private static int GetPointerButton(PointerEventArgs e)
@@ -1316,7 +1257,7 @@ public partial class TerminalControl : Grid
             return;
         }
 
-        var sequence = Model.Terminal.GenerateMouseEvent(
+        var sequence = Model.Terminal.Engine.GenerateMouseEvent(
             button,
             col,
             row,
@@ -1324,6 +1265,110 @@ public partial class TerminalControl : Grid
             ToXTermModifiers(modifiers));
 
         Model.Send(sequence);
+    }
+
+    private bool TrySendGeneratedKey(Key key)
+    {
+        if (Model == null || !TryMapKey(key, out var mappedKey, out var extraModifiers))
+        {
+            return false;
+        }
+
+        SendGeneratedKey(mappedKey, extraModifiers);
+        return true;
+    }
+
+    private void SendGeneratedKey(XKey key, XTermModifiers extraModifiers = XTermModifiers.None)
+    {
+        if (Model == null)
+        {
+            return;
+        }
+
+        var sequence = Model.Terminal.Engine.GenerateKeyInput(key, extraModifiers);
+        if (!string.IsNullOrEmpty(sequence))
+        {
+            Model.Send(sequence);
+        }
+    }
+
+    private static bool TryMapKey(Key key, out XKey mappedKey, out XTermModifiers extraModifiers)
+    {
+        extraModifiers = XTermModifiers.None;
+
+        switch (key)
+        {
+            case Key.Escape:
+                mappedKey = XKey.Escape;
+                return true;
+            case Key.Space:
+                mappedKey = XKey.Space;
+                return true;
+            case Key.Delete:
+                mappedKey = XKey.Delete;
+                return true;
+            case Key.Back:
+                mappedKey = XKey.Backspace;
+                return true;
+            case Key.Up:
+                mappedKey = XKey.UpArrow;
+                return true;
+            case Key.Down:
+                mappedKey = XKey.DownArrow;
+                return true;
+            case Key.Left:
+                mappedKey = XKey.LeftArrow;
+                return true;
+            case Key.Right:
+                mappedKey = XKey.RightArrow;
+                return true;
+            case Key.Home:
+                mappedKey = XKey.Home;
+                return true;
+            case Key.End:
+                mappedKey = XKey.End;
+                return true;
+            case Key.Tab:
+                mappedKey = XKey.Tab;
+                return true;
+            case Key.OemBackTab:
+                mappedKey = XKey.Tab;
+                extraModifiers = XTermModifiers.Shift;
+                return true;
+            case Key.F1:
+                mappedKey = XKey.F1;
+                return true;
+            case Key.F2:
+                mappedKey = XKey.F2;
+                return true;
+            case Key.F3:
+                mappedKey = XKey.F3;
+                return true;
+            case Key.F4:
+                mappedKey = XKey.F4;
+                return true;
+            case Key.F5:
+                mappedKey = XKey.F5;
+                return true;
+            case Key.F6:
+                mappedKey = XKey.F6;
+                return true;
+            case Key.F7:
+                mappedKey = XKey.F7;
+                return true;
+            case Key.F8:
+                mappedKey = XKey.F8;
+                return true;
+            case Key.F9:
+                mappedKey = XKey.F9;
+                return true;
+            case Key.F10:
+                mappedKey = XKey.F10;
+                return true;
+            default:
+                mappedKey = default;
+                return false;
+        }
     }
 
     private static XTermModifiers ToXTermModifiers(AvaloniaModifiers modifiers)

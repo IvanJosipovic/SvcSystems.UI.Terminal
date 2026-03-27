@@ -4,6 +4,7 @@ using Avalonia.Media;
 using PropertyGenerator.Avalonia;
 using System.Text;
 using XTerm.Buffer;
+using XTerm.Input;
 using XTerm.Selection;
 
 namespace AvaloniaTerminal;
@@ -143,12 +144,12 @@ public partial class TerminalControlModel : AvaloniaObject
     /// <summary>
     /// Gets a value indicating whether the caret is visible in the current viewport.
     /// </summary>
-    public bool IsCaretVisible => !Terminal.CursorHidden && Terminal.Buffer.IsAtBottom;
+    public bool IsCaretVisible => Terminal.Engine.CursorVisible && Terminal.Buffer.IsAtBottom;
 
     /// <summary>
     /// Gets a value indicating whether terminal mouse reporting is active.
     /// </summary>
-    public bool IsMouseModeActive => Terminal.MouseMode != MouseMode.Off;
+    public bool IsMouseModeActive => Terminal.Engine.MouseTrackingMode != MouseTrackingMode.None;
 
     /// <summary>
     ///  This event is raised when the terminal size (cols and rows, width, height) has change, due to a NSView frame changed.
@@ -248,7 +249,7 @@ public partial class TerminalControlModel : AvaloniaObject
     /// </summary>
     public void ScrollLines(int lines)
     {
-        Terminal.ScrollLines(lines);
+        Terminal.Engine.ScrollLines(lines);
         UpdateDisplay();
     }
 

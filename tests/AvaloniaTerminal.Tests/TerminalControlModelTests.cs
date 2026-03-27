@@ -261,7 +261,7 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
             Assert.Equal(1d, model.ScrollPosition);
             Assert.InRange(model.ScrollThumbsize, 0.01f, 0.99f);
 
-            model.Terminal.ScrollLines(-1);
+            model.Terminal.Engine.ScrollLines(-1);
 
             Assert.InRange(model.ScrollPosition, 0d, 0.99d);
         });

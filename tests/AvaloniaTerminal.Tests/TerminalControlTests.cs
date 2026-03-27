@@ -645,6 +645,69 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task SpecialKeys_UseEngineGeneratedSequencesInNormalMode()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            var sent = new List<byte[]>();
+            model.UserInput += bytes => sent.Add(bytes.ToArray());
+
+            control.SimulateKeyUp(Key.Up);
+            control.SimulateKeyUp(Key.Delete);
+            control.SimulateKeyUp(Key.OemBackTab);
+            control.SimulateKeyUp(Key.F10);
+
+            var payloads = sent.Select(Encoding.UTF8.GetString).ToArray();
+
+            Assert.Contains("\u001b[A", payloads);
+            Assert.Contains("\u001b[3~", payloads);
+            Assert.Contains("\u001b[Z", payloads);
+            Assert.Contains("\u001b[21~", payloads);
+        });
+    }
+
+    [Fact]
+    public Task ArrowKeys_UseEngineApplicationCursorSequencesWhenEnabled()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            var sent = new List<byte[]>();
+            model.UserInput += bytes => sent.Add(bytes.ToArray());
+
+            model.Feed("\u001b[?1h");
+            control.SimulateKeyUp(Key.Up);
+            control.SimulateKeyUp(Key.Home);
+
+            var payloads = sent.Select(Encoding.UTF8.GetString).ToArray();
+
+            Assert.Contains("\u001bOA", payloads);
+            Assert.Contains("\u001b[H", payloads);
+        });
+    }
+
+    [Fact]
+    public Task PageKeys_UseEngineSequencesWhenApplicationCursorEnabled()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            var sent = new List<byte[]>();
+            model.UserInput += bytes => sent.Add(bytes.ToArray());
+
+            model.Feed("\u001b[?1h");
+            control.SimulateKeyUp(Key.PageUp);
+            control.SimulateKeyUp(Key.PageDown);
+
+            var payloads = sent.Select(Encoding.UTF8.GetString).ToArray();
+
+            Assert.Contains("\u001b[5~", payloads);
+            Assert.Contains("\u001b[6~", payloads);
+        });
+    }
+
+    [Fact]
     public void ShellSample_NormalizesTerminalEnterForRedirectedInput()
     {
         var normalized = ShellControl.NormalizeStandardInput([0x0D]);
