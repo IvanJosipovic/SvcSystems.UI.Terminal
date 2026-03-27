@@ -1,4 +1,5 @@
 using Avalonia.Media;
+using AvaloniaTerminal;
 using AvaloniaTerminal.Samples;
 using Xunit;
 
@@ -14,7 +15,6 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
             var model = new TerminalControlModel();
 
             Assert.NotNull(model.Terminal);
-            Assert.NotNull(model.SelectionService);
             Assert.NotNull(model.SearchService);
             Assert.Equal(model.Terminal.Cols * model.Terminal.Rows, model.ConsoleText.Count);
             Assert.Equal(" ", model.ConsoleText[(0, 0)].Text);
@@ -104,6 +104,22 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task Feed_DefaultStylingUsesWhiteOnBlack()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+
+            model.Feed("A");
+
+            var cell = model.ConsoleText[(0, 0)];
+
+            Assert.Equal(Color.Parse("#FFFFFF"), AssertBrush(cell.Foreground).Color);
+            Assert.Equal(Color.Parse("#000000"), AssertBrush(cell.Background).Color);
+        });
+    }
+
+    [Fact]
     public Task Feed_TitleSequenceUpdatesModelTitle()
     {
         return RunInHeadlessSession(() =>
@@ -168,7 +184,7 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
     }
 
     [Fact]
-    public Task SelectionProperties_ReflectSelectionServiceText()
+    public Task SelectionProperties_ReflectEngineSelectionText()
     {
         return RunInHeadlessSession(() =>
         {
@@ -283,7 +299,7 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
             model.Resize(width: 40, height: 30, textWidth: 10, textHeight: 10);
             model.Feed("1\r\n2\r\n3\r\n4\r\n5\r\n6");
 
-            model.Terminal.Buffers.ActivateAltBuffer(null);
+            model.Terminal.SwitchToAltBuffer();
 
             Assert.False(model.CanScroll);
             Assert.Equal(0d, model.ScrollPosition);
@@ -296,7 +312,7 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
     {
         return RunInHeadlessSession(() =>
         {
-            var model = new TerminalControlModel(new XtermSharp.TerminalOptions
+            var model = new TerminalControlModel(new TerminalOptions
             {
                 Cols = 10,
                 Rows = 4,
@@ -315,7 +331,7 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
     {
         return RunInHeadlessSession(() =>
         {
-            var model = new TerminalControlModel(new XtermSharp.TerminalOptions
+            var model = new TerminalControlModel(new TerminalOptions
             {
                 Cols = 10,
                 Rows = 4,

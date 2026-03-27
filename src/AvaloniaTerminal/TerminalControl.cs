@@ -9,14 +9,18 @@ using Avalonia.Media.TextFormatting;
 using System.Globalization;
 using System.Threading.Tasks;
 using Avalonia.Threading;
-using XtermSharp;
 using Point = Avalonia.Point;
+using AvaloniaModifiers = Avalonia.Input.KeyModifiers;
+using XMouseButton = XTerm.Input.MouseButton;
+using XMouseEventType = XTerm.Input.MouseEventType;
+using XTermModifiers = XTerm.Input.KeyModifiers;
 
 namespace AvaloniaTerminal;
 
 public partial class TerminalControl : Grid
 {
     private static readonly TimeSpan SelectionAutoScrollInterval = TimeSpan.FromMilliseconds(80);
+    private static readonly Brush[] FallbackXtermPalette = CreateFallbackXtermPalette();
 
     private Size _consoleTextSize;
 
@@ -138,6 +142,8 @@ public partial class TerminalControl : Grid
         get => GetValue(SelectionBrushProperty);
         set => SetValue(SelectionBrushProperty, value);
     }
+
+    internal bool CanRenderTextForTests => _canRenderText;
 
     public RightClickAction RightClickAction
     {
@@ -686,27 +692,110 @@ public partial class TerminalControl : Grid
 
     public static Brush ConvertXtermColor(int xtermColor)
     {
-        return Application.Current?.FindResource("AvaloniaTerminalColor" + xtermColor) as Brush ?? new SolidColorBrush(Colors.Transparent);
+        if (xtermColor < 0)
+        {
+            xtermColor = 0;
+        }
+        else if (xtermColor >= FallbackXtermPalette.Length)
+        {
+            xtermColor = FallbackXtermPalette.Length - 1;
+        }
+
+        return FallbackXtermPalette[xtermColor];
+    }
+
+    private static Brush[] CreateFallbackXtermPalette()
+    {
+        Brush[] palette = new Brush[256];
+
+        for (int i = 0; i < palette.Length; i++)
+        {
+            palette[i] = new SolidColorBrush(CreateFallbackXtermColor(i));
+        }
+
+        return palette;
+    }
+
+    private static Color CreateFallbackXtermColor(int index)
+    {
+        return index switch
+        {
+            0 => Color.FromRgb(0x00, 0x00, 0x00),
+            1 => Color.FromRgb(0x80, 0x00, 0x00),
+            2 => Color.FromRgb(0x00, 0x80, 0x00),
+            3 => Color.FromRgb(0x80, 0x80, 0x00),
+            4 => Color.FromRgb(0x00, 0x00, 0x80),
+            5 => Color.FromRgb(0x80, 0x00, 0x80),
+            6 => Color.FromRgb(0x00, 0x80, 0x80),
+            7 => Color.FromRgb(0xC0, 0xC0, 0xC0),
+            8 => Color.FromRgb(0x80, 0x80, 0x80),
+            9 => Color.FromRgb(0xFF, 0x00, 0x00),
+            10 => Color.FromRgb(0x00, 0xFF, 0x00),
+            11 => Color.FromRgb(0xFF, 0xFF, 0x00),
+            12 => Color.FromRgb(0x00, 0x00, 0xFF),
+            13 => Color.FromRgb(0xFF, 0x00, 0xFF),
+            14 => Color.FromRgb(0x00, 0xFF, 0xFF),
+            15 => Color.FromRgb(0xFF, 0xFF, 0xFF),
+            >= 16 and <= 231 => CreateCubeColor(index - 16),
+            >= 232 and <= 255 => CreateGrayColor(index - 232),
+            _ => Color.FromRgb(0x00, 0x00, 0x00),
+        };
+    }
+
+    private static Color CreateCubeColor(int index)
+    {
+        int r = index / 36;
+        int g = (index / 6) % 6;
+        int b = index % 6;
+
+        return Color.FromRgb(ToCubeComponent(r), ToCubeComponent(g), ToCubeComponent(b));
+    }
+
+    private static byte ToCubeComponent(int component)
+    {
+        return component == 0 ? (byte)0 : (byte)(55 + (component * 40));
+    }
+
+    private static Color CreateGrayColor(int index)
+    {
+        byte value = (byte)(8 + (index * 10));
+        return Color.FromRgb(value, value, value);
     }
 
     private void CalculateTextSize()
     {
+        if (TryCalculateTextMetrics(FontFamily, FontSize, out _typeface, out _consoleTextSize))
+        {
+            _canRenderText = true;
+            return;
+        }
+
+        if (TryCalculateTextMetrics(Avalonia.Media.FontFamily.Default, FontSize, out _typeface, out _consoleTextSize))
+        {
+            _canRenderText = true;
+            return;
+        }
+
+        _typeface = new Typeface(Avalonia.Media.FontFamily.Default);
+        _consoleTextSize = new Size(Math.Max(FontSize * 0.6, 1), Math.Max(FontSize * 1.4, 1));
+        _canRenderText = true;
+    }
+
+    private static bool TryCalculateTextMetrics(Avalonia.Media.FontFamily fontFamily, double fontSize, out Typeface typeface, out Size size)
+    {
         try
         {
-            var myFont = Avalonia.Media.FontFamily.Parse(FontFamily) ?? throw new ArgumentException($"The resource {FontFamily} is not a FontFamily.");
-
-            _typeface = new Typeface(myFont);
-            var shaped = TextShaper.Current.ShapeText("a", new TextShaperOptions(_typeface.GlyphTypeface, FontSize));
-            var run = new ShapedTextRun(shaped, new GenericTextRunProperties(_typeface, FontSize));
-
-            _consoleTextSize = run.Size;
-            _canRenderText = true;
+            typeface = new Typeface(fontFamily);
+            var shaped = TextShaper.Current.ShapeText("a", new TextShaperOptions(typeface.GlyphTypeface, fontSize));
+            var run = new ShapedTextRun(shaped, new GenericTextRunProperties(typeface, fontSize));
+            size = run.Size;
+            return true;
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {
-            _typeface = new Typeface(Avalonia.Media.FontFamily.Default);
-            _consoleTextSize = new Size(Math.Max(FontSize * 0.6, 1), Math.Max(FontSize * 1.4, 1));
-            _canRenderText = false;
+            typeface = default;
+            size = default;
+            return false;
         }
     }
 
@@ -777,7 +866,7 @@ public partial class TerminalControl : Grid
             return false;
         }
 
-        if (!Model.SelectionService.Active)
+        if (!Model.Terminal.Selection.HasSelection)
         {
             Model.StartSelectionFromSoftStart();
             Model.DragExtendSelection(row, col);
@@ -804,7 +893,7 @@ public partial class TerminalControl : Grid
             return true;
         }
 
-        if (!Model.SelectionService.Active)
+        if (!Model.Terminal.Selection.HasSelection)
         {
             if (modifiers.HasFlag(KeyModifiers.Shift))
             {
@@ -863,18 +952,16 @@ public partial class TerminalControl : Grid
         }
 
         var button = GetPressedButton(e.GetCurrentPoint(_surface).Properties);
-        var buttonFlags = Model.Terminal.EncodeMouseButton(
-            button,
-            release: false,
-            shift: e.KeyModifiers.HasFlag(KeyModifiers.Shift),
-            meta: e.KeyModifiers.HasFlag(KeyModifiers.Alt),
-            control: e.KeyModifiers.HasFlag(KeyModifiers.Control));
-
         _activeTerminalMouseButton = button;
         _terminalMouseCaptured = true;
         e.Pointer.Capture(_surface);
 
-        Model.Terminal.SendEvent(buttonFlags, col, row);
+        SendMouseSequence(
+            ToMouseButton(button),
+            XMouseEventType.Down,
+            col,
+            row,
+            e.KeyModifiers);
         return true;
     }
 
@@ -901,14 +988,12 @@ public partial class TerminalControl : Grid
         }
 
         var button = hasPressedButton ? GetPressedButton(props) : _activeTerminalMouseButton;
-        var buttonFlags = Model.Terminal.EncodeMouseButton(
-            button,
-            release: false,
-            shift: e.KeyModifiers.HasFlag(KeyModifiers.Shift),
-            meta: e.KeyModifiers.HasFlag(KeyModifiers.Alt),
-            control: e.KeyModifiers.HasFlag(KeyModifiers.Control));
-
-        Model.Terminal.SendMouseMotion(buttonFlags, col, row);
+        SendMouseSequence(
+            ToMouseButton(button),
+            XMouseEventType.Drag,
+            col,
+            row,
+            e.KeyModifiers);
         return true;
     }
 
@@ -934,15 +1019,13 @@ public partial class TerminalControl : Grid
         }
 
         var button = GetPointerButton(e);
-        var buttonFlags = Model.Terminal.EncodeMouseButton(
-            button,
-            release: true,
-            shift: e.KeyModifiers.HasFlag(KeyModifiers.Shift),
-            meta: e.KeyModifiers.HasFlag(KeyModifiers.Alt),
-            control: e.KeyModifiers.HasFlag(KeyModifiers.Control));
-
         _activeTerminalMouseButton = 0;
-        Model.Terminal.SendEvent(buttonFlags, col, row);
+        SendMouseSequence(
+            ToMouseButton(button),
+            XMouseEventType.Up,
+            col,
+            row,
+            e.KeyModifiers);
         return true;
     }
 
@@ -1193,7 +1276,7 @@ public partial class TerminalControl : Grid
 
     private void UpdateScrollBarLayout()
     {
-        var isFullScreen = Model?.Terminal.Buffers.IsAlternateBuffer ?? false;
+        var isFullScreen = Model?.Terminal.IsAlternateBufferActive ?? false;
 
         _scrollBarColumn.Width = isFullScreen ? new GridLength(0) : GridLength.Auto;
         _verticalScrollBar.Visibility = isFullScreen ? ScrollBarVisibility.Hidden : ScrollBarVisibility.Auto;
@@ -1217,15 +1300,63 @@ public partial class TerminalControl : Grid
         for (var i = 0; i < repeats; i++)
         {
             var button = delta.Y > 0 ? 4 : 5;
-            var buttonFlags = Model.Terminal.EncodeMouseButton(
-                button,
-                release: false,
-                shift: false,
-                meta: false,
-                control: false);
-
-            Model.Terminal.SendEvent(buttonFlags, col, row);
+            SendMouseSequence(
+                button == 4 ? XMouseButton.WheelUp : XMouseButton.WheelDown,
+                button == 4 ? XMouseEventType.WheelUp : XMouseEventType.WheelDown,
+                col,
+                row,
+                KeyModifiers.None);
         }
+    }
+
+    private void SendMouseSequence(XMouseButton button, XMouseEventType eventType, int col, int row, AvaloniaModifiers modifiers)
+    {
+        if (Model == null)
+        {
+            return;
+        }
+
+        var sequence = Model.Terminal.GenerateMouseEvent(
+            button,
+            col,
+            row,
+            eventType,
+            ToXTermModifiers(modifiers));
+
+        Model.Send(sequence);
+    }
+
+    private static XTermModifiers ToXTermModifiers(AvaloniaModifiers modifiers)
+    {
+        XTermModifiers result = XTermModifiers.None;
+
+        if (modifiers.HasFlag(AvaloniaModifiers.Shift))
+        {
+            result |= XTermModifiers.Shift;
+        }
+
+        if (modifiers.HasFlag(AvaloniaModifiers.Alt))
+        {
+            result |= XTermModifiers.Alt;
+        }
+
+        if (modifiers.HasFlag(AvaloniaModifiers.Control))
+        {
+            result |= XTermModifiers.Control;
+        }
+
+        return result;
+    }
+
+    private static XMouseButton ToMouseButton(int button)
+    {
+        return button switch
+        {
+            0 => XMouseButton.Left,
+            1 => XMouseButton.Middle,
+            2 => XMouseButton.Right,
+            _ => XMouseButton.Left,
+        };
     }
 
     private void OnVerticalScrollBarValueChanged(object? sender, RangeBaseValueChangedEventArgs e)
@@ -1317,54 +1448,48 @@ public partial class TerminalControl : Grid
 
     private IEnumerable<Rect> GetSelectionRects()
     {
-        if (Model == null || !Model.SelectionService.Active)
+        if (Model == null || !Model.Terminal.Selection.HasSelection)
         {
             yield break;
         }
 
-        var selection = Model.SelectionService;
-        var start = selection.Start;
-        var end = selection.End;
-
-        if (start == end)
+        for (var row = 0; row < Model.Terminal.Rows; row++)
         {
-            yield break;
-        }
+            int? runStart = null;
 
-        if ((start.Y > end.Y) || (start.Y == end.Y && start.X > end.X))
-        {
-            (start, end) = (end, start);
-        }
-
-        var screenStartRow = start.Y - Model.Terminal.Buffer.YDisp;
-        var screenEndRow = end.Y - Model.Terminal.Buffer.YDisp;
-
-        for (var row = screenStartRow; row <= screenEndRow; row++)
-        {
-            if (row < 0 || row >= Model.Terminal.Rows)
+            for (var col = 0; col < Model.Terminal.Cols; col++)
             {
-                continue;
+                var selected = Model.Terminal.Selection.IsCellSelected(col, row);
+                if (selected && runStart is null)
+                {
+                    runStart = col;
+                }
+                else if (!selected && runStart is not null)
+                {
+                    yield return CreateSelectionRect(row, runStart.Value, col);
+                    runStart = null;
+                }
             }
 
-            var colStart = row == screenStartRow ? start.X : 0;
-            var colEnd = row == screenEndRow ? end.X : Model.Terminal.Cols;
-
-            if (colEnd == colStart)
+            if (runStart is not null)
             {
-                colEnd = Math.Min(colStart + 1, Model.Terminal.Cols);
+                yield return CreateSelectionRect(row, runStart.Value, Model.Terminal.Cols);
             }
-
-            if (colEnd < colStart)
-            {
-                (colStart, colEnd) = (colEnd, colStart);
-            }
-
-            yield return new Rect(
-                (colStart * _consoleTextSize.Width) - 1,
-                row * _consoleTextSize.Height,
-                Math.Max(((colEnd - colStart) * _consoleTextSize.Width) + 2, _consoleTextSize.Width),
-                _consoleTextSize.Height);
         }
+    }
+
+    private Rect CreateSelectionRect(int row, int colStart, int colEnd)
+    {
+        if (colEnd == colStart)
+        {
+            colEnd = Math.Min(colStart + 1, Model?.Terminal.Cols ?? colStart + 1);
+        }
+
+        return new Rect(
+            (colStart * _consoleTextSize.Width) - 1,
+            row * _consoleTextSize.Height,
+            Math.Max(((colEnd - colStart) * _consoleTextSize.Width) + 2, _consoleTextSize.Width),
+            _consoleTextSize.Height);
     }
 
     private IBrush ResolveSelectionBrush()

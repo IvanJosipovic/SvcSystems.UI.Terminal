@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Layout;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using AvaloniaTerminal;
 using AvaloniaTerminal.Samples;
 using System.Text;
 using Xunit;
@@ -103,6 +104,34 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             model.ScrollToYDisp(0);
 
             Assert.False(control.HasVisibleCaret);
+        });
+    }
+
+    [Fact]
+    public Task InvalidFontFamily_FallsBackToADrawableTypeface()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out _, out _);
+
+            control.FontFamily = "__missing_font_family__";
+
+            Assert.True(control.CanRenderTextForTests);
+        });
+    }
+
+    [Fact]
+    public Task ApplicationResourcePaletteOverride_DoesNotAffectTerminalPalette()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var application = Avalonia.Application.Current ?? throw new InvalidOperationException("No application is running.");
+            application.Resources["AvaloniaTerminalColor15"] = Avalonia.Media.Brushes.Black;
+
+            var brush = TerminalControl.ConvertXtermColor(15);
+
+            var solid = Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(brush);
+            Assert.Equal(Avalonia.Media.Colors.White, solid.Color);
         });
     }
 

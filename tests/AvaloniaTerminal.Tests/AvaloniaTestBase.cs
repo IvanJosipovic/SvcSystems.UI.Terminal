@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Headless;
 using Avalonia.Markup.Xaml.Styling;
 using Avalonia.Themes.Fluent;
+using AvaloniaTerminal;
 using System.Threading;
 
 namespace AvaloniaTerminal.Tests;

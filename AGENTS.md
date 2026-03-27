@@ -31,8 +31,8 @@ Docker
 ## 2) Architecture
 
 ### Layering
-- Avalonia.Terminals contains the terminal control code
-- XtermSharp contains the xterm library
+- Avalonia.Terminal contains the terminal control code
+- AvaloniaTerminal uses the XTerm.NET package for terminal emulation
 - AvaloniaTerminal.Desktop is the sample project
 - AvaloniaTerminal.Tests is the test project
 

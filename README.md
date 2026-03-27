@@ -2,13 +2,13 @@
 [![Nuget (with prereleases)](https://img.shields.io/nuget/vpre/AvaloniaTerminal.svg?style=flat-square)](https://www.nuget.org/packages/AvaloniaTerminal)
 [![Nuget (with prereleases)](https://img.shields.io/nuget/dt/AvaloniaTerminal.svg?style=flat-square)](https://www.nuget.org/packages/AvaloniaTerminal)
 
-Avalonia terminal control built on top of [XtermSharp](https://github.com/migueldeicaza/XtermSharp).
+Avalonia terminal control built on top of [XTerm.NET](https://github.com/tomlm/XTerm.NET).
 
 ![screenshot](https://raw.githubusercontent.com/IvanJosipovic/AvaloniaTerminal/refs/heads/alpha/docs/Screenshot.png)
 
 ## Features
 
-- Terminal rendering backed by `XtermSharp`
+- Terminal rendering backed by `XTerm.NET`
 - Scrollback with mouse wheel, scrollbar, `PageUp`, and `PageDown`
 - Caret rendering with theme-aware default styling
 - Text selection with drag, double-click word selection, triple-click row selection, and drag auto-scroll
@@ -60,11 +60,9 @@ public partial class MainWindow : Window
 }
 ```
 
-You can also pass `XtermSharp.TerminalOptions` when you need non-default terminal behavior:
+You can also pass `TerminalOptions` when you need non-default terminal behavior:
 
 ```csharp
-using XtermSharp;
-
 var model = new TerminalControlModel(new TerminalOptions
 {
     ReflowOnResize = false,
@@ -156,7 +154,7 @@ _ = Task.Run(async () =>
 - `SelectPreviousSearchResult()`
 - `ContextRequested`
 
-`XtermSharp.TerminalOptions` used by `TerminalControlModel`:
+`TerminalOptions` used by `TerminalControlModel`:
 
 - `Scrollback`
 - `ConvertEol`
@@ -230,7 +228,7 @@ Useful model properties:
 
 ## Mouse Reporting
 
-When the terminal application enables mouse reporting, `TerminalControl` forwards pointer press, release, and motion events to `XtermSharp` instead of using them for text selection. This allows interactive terminal applications to receive mouse input.
+When the terminal application enables mouse reporting, `TerminalControl` forwards pointer press, release, and motion events to `XTerm.NET` instead of using them for text selection. This allows interactive terminal applications to receive mouse input.
 
 This is controlled by the terminal app, not by the Avalonia host. If an app does not switch the terminal into xterm mouse mode, the control will keep using the pointer for normal text selection.
 

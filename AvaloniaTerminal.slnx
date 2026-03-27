@@ -8,6 +8,5 @@
   <Project Path="src/AvaloniaTerminal.Desktop/AvaloniaTerminal.Desktop.csproj" />
   <Project Path="src/AvaloniaTerminal.Samples/AvaloniaTerminal.Samples.csproj" />
   <Project Path="src/AvaloniaTerminal/AvaloniaTerminal.csproj" />
-  <Project Path="src/XtermSharp/XtermSharp.csproj" />
   <Project Path="tests/AvaloniaTerminal.Tests/AvaloniaTerminal.Tests.csproj" />
 </Solution>
