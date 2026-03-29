@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input.Platform;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -211,7 +212,7 @@ public partial class TerminalControl : Grid
         var clipboard = ResolveClipboard();
         if (clipboard != null)
         {
-            await clipboard.SetTextAsync(SelectedText).ConfigureAwait(true);
+            await clipboard.SetTextAsync(SelectedText ?? string.Empty).ConfigureAwait(true);
         }
     }
 
@@ -229,9 +230,7 @@ public partial class TerminalControl : Grid
             {
                 return;
             }
-#pragma warning disable CS0618
-            text = await clipboard.GetTextAsync().ConfigureAwait(true);
-#pragma warning restore CS0618
+            text = await clipboard.TryGetTextAsync().ConfigureAwait(true);
         }
 
         if (!string.IsNullOrEmpty(text))
@@ -622,14 +621,14 @@ public partial class TerminalControl : Grid
         StopSelectionAutoScroll();
     }
 
-    protected override void OnGotFocus(GotFocusEventArgs e)
+    protected override void OnGotFocus(FocusChangedEventArgs e)
     {
         base.OnGotFocus(e);
         _hasFocus = true;
         _surface.InvalidateVisual();
     }
 
-    protected override void OnLostFocus(RoutedEventArgs e)
+    protected override void OnLostFocus(FocusChangedEventArgs e)
     {
         base.OnLostFocus(e);
         _hasFocus = false;
@@ -732,7 +731,12 @@ public partial class TerminalControl : Grid
         try
         {
             typeface = new Typeface(fontFamily);
-            var shaped = TextShaper.Current.ShapeText("a", new TextShaperOptions(typeface.GlyphTypeface, fontSize));
+            if (!FontManager.Current.TryGetGlyphTypeface(typeface, out var glyphTypeface))
+            {
+                size = default;
+                return false;
+            }
+            var shaped = TextShaper.Current.ShapeText("a", new TextShaperOptions(glyphTypeface, fontSize));
             var run = new ShapedTextRun(shaped, new GenericTextRunProperties(typeface, fontSize));
             size = run.Size;
             return true;
