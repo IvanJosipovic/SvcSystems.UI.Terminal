@@ -253,11 +253,11 @@ This is controlled by the terminal app, not by the Avalonia host. If an app does
 
 ## Styling
 
-The library includes terminal color resources in:
+The library defines its default terminal styling in:
 
 - [`src/AvaloniaTerminal/Styles/Colors.axaml`](src/AvaloniaTerminal/Styles/Colors.axaml)
 
-The desktop sample includes those resources automatically. If you host the control yourself, include the style resource in your application when needed:
+The desktop sample includes those resources automatically. If you host the control yourself, include the style resource in your application:
 
 ```xml
 <Application.Styles>
@@ -265,12 +265,55 @@ The desktop sample includes those resources automatically. If you host the contr
 </Application.Styles>
 ```
 
-Useful styling hooks on `TerminalControl`:
+`Colors.axaml` provides:
+
+- the default `TerminalControl` font settings
+- the exported 256-color terminal palette as `AvaloniaTerminalColor0` through `AvaloniaTerminalColor255`
+- resource keys that the control reads for optional caret and selection overrides
+
+Available resource keys:
+
+- `AvaloniaTerminalFontFamily`
+- `AvaloniaTerminalFontSize`
+- `AvaloniaTerminalCaretBrush`
+- `AvaloniaTerminalSelectionBrush`
+- `AvaloniaTerminalColor0` ... `AvaloniaTerminalColor255`
+
+You can override those resources at the application level to align the terminal with your app theme:
+
+```xml
+<Application.Resources>
+    <x:String x:Key="AvaloniaTerminalFontFamily">Fira Code</x:String>
+    <x:Double x:Key="AvaloniaTerminalFontSize">14</x:Double>
+    <SolidColorBrush x:Key="AvaloniaTerminalCaretBrush" Color="#FFB000" />
+    <SolidColorBrush x:Key="AvaloniaTerminalSelectionBrush" Color="#4060A0FF" />
+    <SolidColorBrush x:Key="AvaloniaTerminalColor0" Color="#111111" />
+    <SolidColorBrush x:Key="AvaloniaTerminalColor15" Color="#F5F5F5" />
+</Application.Resources>
+```
+
+`TerminalControl` also exposes direct styling hooks when you want to customize a single instance:
 
 - `FontFamily`
 - `FontSize`
 - `CaretBrush`
 - `SelectionBrush`
+
+Example:
+
+```xml
+<terminal:TerminalControl
+    FontFamily="JetBrains Mono"
+    FontSize="13"
+    CaretBrush="Orange"
+    SelectionBrush="#4060A0FF" />
+```
+
+Notes:
+
+- font defaults come from `Colors.axaml` and can be overridden by application resources
+- caret and selection use the control properties first, then the corresponding application resources, then the built-in fallback behavior
+- ANSI foreground/background rendering uses the exported `AvaloniaTerminalColor*` resource keys, so hosts can replace the palette without changing library code
 
 ## Samples
 

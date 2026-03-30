@@ -121,17 +121,64 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     }
 
     [Fact]
-    public Task ApplicationResourcePaletteOverride_DoesNotAffectTerminalPalette()
+    public Task TerminalControlPalette_UsesConfiguredDefaultPalette()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out _, out _);
+            var brush = control.ResolveXtermColorForTests(15);
+
+            var solid = Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(brush);
+            Assert.Equal(Avalonia.Media.Colors.White, solid.Color);
+        });
+    }
+
+    [Fact]
+    public Task ResourceStyle_DefaultsAlignFontCaretAndSelection()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out _, out _);
+
+            Assert.Equal("Cascadia Mono", control.FontFamily);
+            Assert.Equal(12, control.FontSize);
+            Assert.Null(control.CaretBrush);
+            Assert.Null(control.SelectionBrush);
+        });
+    }
+
+    [Fact]
+    public Task ApplicationResources_CanOverrideControlStyleDefaults()
     {
         return RunInHeadlessSession(() =>
         {
             var application = Avalonia.Application.Current ?? throw new InvalidOperationException("No application is running.");
-            application.Resources["AvaloniaTerminalColor15"] = Avalonia.Media.Brushes.Black;
+            var hadFontFamily = application.Resources.TryGetValue("AvaloniaTerminalFontFamily", out var previousFontFamily);
+            var hadFontSize = application.Resources.TryGetValue("AvaloniaTerminalFontSize", out var previousFontSize);
+            var hadCaretBrush = application.Resources.TryGetValue("AvaloniaTerminalCaretBrush", out var previousCaretBrush);
+            var hadSelectionBrush = application.Resources.TryGetValue("AvaloniaTerminalSelectionBrush", out var previousSelectionBrush);
 
-            var brush = TerminalControl.ConvertXtermColor(15);
+            try
+            {
+                application.Resources["AvaloniaTerminalFontFamily"] = "Fira Code";
+                application.Resources["AvaloniaTerminalFontSize"] = 14d;
+                application.Resources["AvaloniaTerminalCaretBrush"] = Avalonia.Media.Brushes.Orange;
+                application.Resources["AvaloniaTerminalSelectionBrush"] = Avalonia.Media.Brushes.CadetBlue;
 
-            var solid = Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(brush);
-            Assert.Equal(Avalonia.Media.Colors.White, solid.Color);
+                var control = CreateControl(out _, out _);
+
+                Assert.Equal("Fira Code", control.FontFamily);
+                Assert.Equal(14d, control.FontSize);
+                Assert.Same(Avalonia.Media.Brushes.Orange, control.CaretBrushForTests);
+                Assert.Same(Avalonia.Media.Brushes.CadetBlue, control.SelectionBrushForTests);
+            }
+            finally
+            {
+                RestoreResource(application, "AvaloniaTerminalFontFamily", hadFontFamily, previousFontFamily);
+                RestoreResource(application, "AvaloniaTerminalFontSize", hadFontSize, previousFontSize);
+                RestoreResource(application, "AvaloniaTerminalCaretBrush", hadCaretBrush, previousCaretBrush);
+                RestoreResource(application, "AvaloniaTerminalSelectionBrush", hadSelectionBrush, previousSelectionBrush);
+            }
         });
     }
 
@@ -809,6 +856,18 @@ public sealed class TerminalControlTests : AvaloniaTestBase
         TerminalSamples.LoadScrollSample(model);
         Assert.True(model.CanScroll);
         Assert.True(model.ScrollOffset > 0);
+    }
+
+    private static void RestoreResource(Avalonia.Application application, string key, bool hadPrevious, object? previous)
+    {
+        if (hadPrevious)
+        {
+            application.Resources[key] = previous;
+        }
+        else
+        {
+            application.Resources.Remove(key);
+        }
     }
 
     private sealed class TestableTerminalControl : TerminalControl

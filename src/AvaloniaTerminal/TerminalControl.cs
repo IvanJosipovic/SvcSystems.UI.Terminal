@@ -6,6 +6,7 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
+using Avalonia.Styling;
 using System.Globalization;
 using System.Threading.Tasks;
 using Avalonia.Threading;
@@ -96,6 +97,7 @@ public partial class TerminalControl : Grid
         };
         _selectionAutoScrollTimer.Tick += OnSelectionAutoScrollTimerTick;
 
+        ApplyResourceDefaults();
         CalculateTextSize();
         UpdateScrollBar();
     }
@@ -647,7 +649,88 @@ public partial class TerminalControl : Grid
             xtermColor = FallbackXtermPalette.Length - 1;
         }
 
+        if (TryGetApplicationResource(GetXtermColorResourceKey(xtermColor)) is Brush resourceBrush)
+        {
+            return resourceBrush;
+        }
+
         return FallbackXtermPalette[xtermColor];
+    }
+
+    private static string GetXtermColorResourceKey(int xtermColor)
+    {
+        return $"AvaloniaTerminalColor{xtermColor}";
+    }
+
+    private static object? TryGetApplicationResource(string resourceKey)
+    {
+        var application = Application.Current;
+        if (application == null)
+        {
+            return null;
+        }
+
+        if (application.Resources.ContainsKey(resourceKey))
+        {
+            return application.Resources[resourceKey];
+        }
+
+        if (application.TryFindResource(resourceKey, out var value))
+        {
+            return value;
+        }
+
+        return null;
+    }
+
+    private bool TryGetResourceValue(string resourceKey, out object? value)
+    {
+        if (Resources.ContainsKey(resourceKey))
+        {
+            value = Resources[resourceKey];
+            return true;
+        }
+
+        if (Application.Current?.Resources.ContainsKey(resourceKey) == true)
+        {
+            value = Application.Current.Resources[resourceKey];
+            return true;
+        }
+
+        if (this.TryFindResource(resourceKey, out value))
+        {
+            return true;
+        }
+
+        value = TryGetApplicationResource(resourceKey);
+        return value != null;
+    }
+
+    private void ApplyResourceDefaults()
+    {
+        if (TryGetApplicationResource("AvaloniaTerminalFontFamily") is string fontFamily)
+        {
+            FontFamily = fontFamily;
+        }
+
+        if (TryGetApplicationResource("AvaloniaTerminalFontSize") is double fontSize)
+        {
+            FontSize = fontSize;
+        }
+        else if (TryGetApplicationResource("AvaloniaTerminalFontSize") is int fontSizeInt)
+        {
+            FontSize = fontSizeInt;
+        }
+
+        if (TryGetApplicationResource("AvaloniaTerminalCaretBrush") is IBrush caretBrush)
+        {
+            CaretBrush = caretBrush;
+        }
+
+        if (TryGetApplicationResource("AvaloniaTerminalSelectionBrush") is IBrush selectionBrush)
+        {
+            SelectionBrush = selectionBrush;
+        }
     }
 
     private static Brush[] CreateFallbackXtermPalette()
@@ -1427,7 +1510,7 @@ public partial class TerminalControl : Grid
         public override void Render(DrawingContext context)
         {
             var rect = new Rect(0, 0, Bounds.Width, Bounds.Height);
-            context.FillRectangle(ConvertXtermColor(0), rect);
+            context.FillRectangle(owner.ResolvePaletteBrush(0), rect);
 
             if (owner.Model == null)
             {
@@ -1443,7 +1526,7 @@ public partial class TerminalControl : Grid
                         owner._consoleTextSize.Height * row.RowIndex,
                         owner._consoleTextSize.Width * run.CellWidth,
                         owner._consoleTextSize.Height + 1);
-                    context.FillRectangle(run.Background, runRect);
+                    context.FillRectangle(owner.ResolveColorBrush(run.BackgroundColor, isForeground: false), runRect);
 
                     if (owner._canRenderText)
                     {
@@ -1547,6 +1630,11 @@ public partial class TerminalControl : Grid
             return SelectionBrush;
         }
 
+        if (TryGetApplicationResource("AvaloniaTerminalSelectionBrush") is IBrush resourceBrush)
+        {
+            return resourceBrush;
+        }
+
         if (Application.Current?.FindResource("ThemeAccentBrush") is ISolidColorBrush accentBrush)
         {
             return new SolidColorBrush(accentBrush.Color, 0.35);
@@ -1566,6 +1654,11 @@ public partial class TerminalControl : Grid
         if (CaretBrush is not null)
         {
             return CaretBrush;
+        }
+
+        if (TryGetApplicationResource("AvaloniaTerminalCaretBrush") is IBrush resourceBrush)
+        {
+            return resourceBrush;
         }
 
         if (TryGetCaretColors(out var foregroundColor, out var backgroundColor))
@@ -1627,16 +1720,28 @@ public partial class TerminalControl : Grid
         return true;
     }
 
-    private static Brush ResolveColorBrush(int color, bool isForeground)
+    private Brush ResolvePaletteBrush(int xtermColor)
+    {
+        xtermColor = Math.Clamp(xtermColor, 0, FallbackXtermPalette.Length - 1);
+
+        if (TryGetResourceValue(GetXtermColorResourceKey(xtermColor), out var resourceValue) && resourceValue is Brush resourceBrush)
+        {
+            return resourceBrush;
+        }
+
+        return FallbackXtermPalette[xtermColor];
+    }
+
+    private Brush ResolveColorBrush(int color, bool isForeground)
     {
         if (color == 256 || color == 257)
         {
-            return ConvertXtermColor(isForeground ? 15 : 0);
+            return ResolvePaletteBrush(isForeground ? 15 : 0);
         }
 
         if (color is >= 0 and <= 255)
         {
-            return ConvertXtermColor(color);
+            return ResolvePaletteBrush(color);
         }
 
         var red = (byte)((color >> 16) & 0xFF);
@@ -1649,7 +1754,7 @@ public partial class TerminalControl : Grid
     {
         var cacheKey = new FormattedTextCacheKey(
             run.Text,
-            run.Foreground,
+            run.ForegroundColor,
             run.FontWeight,
             run.FontStyle,
             GetTextDecorationFlags(run.TextDecorations));
@@ -1661,7 +1766,8 @@ public partial class TerminalControl : Grid
 
         EvictFormattedTextCacheEntriesIfNeeded();
 
-        var formattedText = new FormattedText(run.Text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, _typeface, FontSize, run.Foreground);
+        var foregroundBrush = ResolveColorBrush(run.ForegroundColor, isForeground: true);
+        var formattedText = new FormattedText(run.Text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, _typeface, FontSize, foregroundBrush);
         if (run.TextDecorations != null)
         {
             formattedText.SetTextDecorations(run.TextDecorations);
@@ -1734,11 +1840,13 @@ public partial class TerminalControl : Grid
     }
 
     internal int SelectionAutoScrollDeltaForTests => _selectionAutoScrollDelta;
+    internal IBrush SelectionBrushForTests => ResolveSelectionBrush();
+    internal IBrush ResolveXtermColorForTests(int xtermColor) => ResolvePaletteBrush(xtermColor);
 }
 
 internal readonly record struct FormattedTextCacheKey(
     string Text,
-    IBrush Foreground,
+    int ForegroundColor,
     FontWeight FontWeight,
     FontStyle FontStyle,
     TextDecorationFlags TextDecorations);

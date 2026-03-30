@@ -98,8 +98,8 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
             Assert.Equal(FontWeight.Bold, cell.FontWeight);
             Assert.Equal(FontStyle.Italic, cell.FontStyle);
             Assert.Contains(cell.TextDecorations!, decoration => decoration.Location == TextDecorationLocation.Underline);
-            Assert.Equal(Color.Parse("#800000"), AssertBrush(cell.Foreground).Color);
-            Assert.Equal(Color.Parse("#C0C0C0"), AssertBrush(cell.Background).Color);
+            Assert.Equal(1, cell.ForegroundColor);
+            Assert.Equal(7, cell.BackgroundColor);
             Assert.Equal(1, refreshCount);
         });
     }
@@ -115,8 +115,8 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
 
             var cell = GetRun(model, 0, 0);
 
-            Assert.Equal(Color.Parse("#FFFFFF"), AssertBrush(cell.Foreground).Color);
-            Assert.Equal(Color.Parse("#000000"), AssertBrush(cell.Background).Color);
+            Assert.Equal(256, cell.ForegroundColor);
+            Assert.Equal(257, cell.BackgroundColor);
         });
     }
 
@@ -385,8 +385,8 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
             model.Feed("\u001b[7mA");
 
             var run = GetRun(model, 0, 0);
-            Assert.Equal(Color.Parse("#FFFFFF"), AssertBrush(run.Foreground).Color);
-            Assert.Equal(Color.Parse("#000000"), AssertBrush(run.Background).Color);
+            Assert.Equal(257, run.ForegroundColor);
+            Assert.Equal(256, run.BackgroundColor);
         });
     }
 
@@ -409,11 +409,6 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
 
             Assert.Equal(before, model.Terminal.Buffer.Lines.Length);
         });
-    }
-
-    private static SolidColorBrush AssertBrush(IBrush brush)
-    {
-        return Assert.IsType<SolidColorBrush>(brush);
     }
 
     private static int GetViewportCoverage(TerminalControlModel model)
