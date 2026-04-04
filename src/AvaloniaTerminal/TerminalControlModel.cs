@@ -134,8 +134,7 @@ public partial class TerminalControlModel : AvaloniaObject
     {
         get
         {
-            var row = Terminal.Buffer.Y - Terminal.Buffer.YDisp;
-            return Math.Clamp(row, 0, Math.Max(Terminal.Rows - 1, 0));
+            return Math.Clamp(Terminal.Buffer.Y, 0, Math.Max(Terminal.Rows - 1, 0));
         }
     }
 
