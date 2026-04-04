@@ -108,6 +108,20 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task Caret_RemainsAnchoredToTheBottomRowWhenScrollbackIsEnabled()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            TerminalSamples.LoadScrollSample(model);
+
+            Assert.True(control.HasVisibleCaret);
+            Assert.True(model.ScrollOffset > 0);
+            Assert.Equal((model.Terminal.Rows - 1) * control.CaretRect.Height, control.CaretRect.Y);
+        });
+    }
+
+    [Fact]
     public Task InvalidFontFamily_FallsBackToADrawableTypeface()
     {
         return RunInHeadlessSession(() =>

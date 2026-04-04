@@ -185,6 +185,25 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task CaretRow_RemainsOnTheBottomViewportRowAfterScrollbackGrows()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel(new TerminalOptions
+            {
+                Cols = 10,
+                Rows = 4,
+            });
+
+            model.Feed("1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n8\r\n9\r\n10");
+
+            Assert.True(model.ScrollOffset > 0);
+            Assert.True(model.IsCaretVisible);
+            Assert.Equal(model.Terminal.Rows - 1, model.CaretRow);
+        });
+    }
+
+    [Fact]
     public Task SelectionProperties_ReflectEngineSelectionText()
     {
         return RunInHeadlessSession(() =>
