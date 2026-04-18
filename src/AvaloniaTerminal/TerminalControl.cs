@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -231,9 +232,8 @@ public partial class TerminalControl : Grid
             {
                 return;
             }
-#pragma warning disable CS0618
-            text = await clipboard.GetTextAsync().ConfigureAwait(true);
-#pragma warning restore CS0618
+
+            text = await clipboard.TryGetTextAsync().ConfigureAwait(true);
         }
 
         if (!string.IsNullOrEmpty(text))
@@ -624,14 +624,14 @@ public partial class TerminalControl : Grid
         StopSelectionAutoScroll();
     }
 
-    protected override void OnGotFocus(GotFocusEventArgs e)
+    protected override void OnGotFocus(FocusChangedEventArgs e)
     {
         base.OnGotFocus(e);
         _hasFocus = true;
         _surface.InvalidateVisual();
     }
 
-    protected override void OnLostFocus(RoutedEventArgs e)
+    protected override void OnLostFocus(FocusChangedEventArgs e)
     {
         base.OnLostFocus(e);
         _hasFocus = false;
