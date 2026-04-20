@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Threading;
 using AvaloniaTerminal;
 using AvaloniaTerminal.Samples;
 using System.Text;
@@ -125,7 +126,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     [Fact]
     public Task ScrollSampleControl_KeepsTheCaretAtTheBottomAfterLayout()
     {
-        return RunInHeadlessSession(() =>
+        return RunInHeadlessSession(async () =>
         {
             var sample = new ScrollSampleControl
             {
@@ -135,6 +136,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
 
             sample.Measure(new Size(320, 120));
             sample.Arrange(new Rect(0, 0, 320, 120));
+            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
 
             var grid = Assert.IsType<Grid>(sample.Content);
             var terminal = Assert.IsType<TerminalControl>(grid.Children.OfType<TerminalControl>().Single());

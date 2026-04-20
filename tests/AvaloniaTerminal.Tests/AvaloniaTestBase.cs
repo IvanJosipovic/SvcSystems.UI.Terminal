@@ -17,6 +17,11 @@ public abstract class AvaloniaTestBase
         return Session.Value.Dispatch(action, CancellationToken.None);
     }
 
+    protected static Task RunInHeadlessSession(Func<Task> action)
+    {
+        return Session.Value.Dispatch(action, CancellationToken.None);
+    }
+
     protected static async Task<T> RunInHeadlessSession<T>(Func<T> action)
     {
         T result = default!;
