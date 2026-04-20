@@ -10,6 +10,6 @@ if ! git diff --quiet --ignore-submodules -- || [ -n "$(git ls-files --others --
 fi
 
 dotnet format --verbosity minimal
-dotnet dnx XamlStyler.Console -r -d $repo_root -c Settings.XamlStyler
+dotnet dnx XamlStyler.Console -r -d "$repo_root" -c Settings.XamlStyler
 
 git add -u
