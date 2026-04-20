@@ -134,8 +134,7 @@ public partial class TerminalControlModel : AvaloniaObject
     {
         get
         {
-            var row = Terminal.Buffer.Y - Terminal.Buffer.YDisp;
-            return Math.Clamp(row, 0, Math.Max(Terminal.Rows - 1, 0));
+            return Math.Clamp(Terminal.Buffer.Y, 0, Math.Max(Terminal.Rows - 1, 0));
         }
     }
 
@@ -567,8 +566,8 @@ public partial class TerminalControlModel : AvaloniaObject
                 startColumn,
                 cellWidth,
                 text.ToString(),
-                ResolveBrush(styleKey.ForegroundColor, isForeground: true),
-                ResolveBrush(styleKey.BackgroundColor, isForeground: false),
+                styleKey.ForegroundColor,
+                styleKey.BackgroundColor,
                 styleKey.Bold ? FontWeight.Bold : FontWeight.Normal,
                 styleKey.Italic ? FontStyle.Italic : FontStyle.Normal,
                 CreateTextDecorations(styleKey)));
@@ -620,29 +619,6 @@ public partial class TerminalControlModel : AvaloniaObject
             attribute.IsStrikethrough());
     }
 
-    private static IBrush ResolveBrush(int color, bool isForeground)
-    {
-        if (color == 256)
-        {
-            return TerminalControl.ConvertXtermColor(isForeground ? 15 : 0);
-        }
-
-        if (color == 257)
-        {
-            return TerminalControl.ConvertXtermColor(isForeground ? 15 : 0);
-        }
-
-        if (color is >= 0 and <= 255)
-        {
-            return TerminalControl.ConvertXtermColor(color);
-        }
-
-        var red = (byte)((color >> 16) & 0xFF);
-        var green = (byte)((color >> 8) & 0xFF);
-        var blue = (byte)(color & 0xFF);
-        return new SolidColorBrush(Color.FromRgb(red, green, blue));
-    }
-
     private static TextDecorationCollection? CreateTextDecorations(ViewportStyleKey styleKey)
     {
         TextDecorationCollection? decorations = null;
@@ -670,8 +646,8 @@ internal readonly record struct ViewportTextRun(
     int StartColumn,
     int CellWidth,
     string Text,
-    IBrush Foreground,
-    IBrush Background,
+    int ForegroundColor,
+    int BackgroundColor,
     FontWeight FontWeight,
     FontStyle FontStyle,
     TextDecorationCollection? TextDecorations);
