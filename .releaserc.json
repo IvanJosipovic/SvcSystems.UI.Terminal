@@ -24,12 +24,6 @@
       }
     ],
     [
-      "@semantic-release/changelog",
-      {
-        "changelogFile": "CHANGELOG.md"
-      }
-    ],
-    [
       "@semantic-release/github",
       {
         "assets": [
@@ -37,7 +31,7 @@
             "path": "CHANGELOG.md"
           },
           {
-            "path": "src/**/*.nupkg"
+            "path": "nuget-packages/**/*.nupkg"
           }
         ]
       }

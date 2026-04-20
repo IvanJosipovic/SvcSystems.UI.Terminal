@@ -1,7 +1,9 @@
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Threading;
 using AvaloniaTerminal;
 using AvaloniaTerminal.Samples;
 using System.Text;
@@ -39,7 +41,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             model.Feed("\u001b[?1006h\u001b[?1000h");
 
             List<byte[]> sent = [];
-            model.UserInput += bytes => sent.Add(bytes.ToArray());
+            model.UserInput += (_, e) => sent.Add(e.Data.ToArray());
 
             control.SimulatePointerWheel(new Vector(0, 1));
 
@@ -59,7 +61,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             model.Feed("\u001b[?1006h\u001b[?1000h");
 
             List<byte[]> sent = [];
-            model.UserInput += bytes => sent.Add(bytes.ToArray());
+            model.UserInput += (_, e) => sent.Add(e.Data.ToArray());
 
             control.SimulatePointerWheel(new Vector(0, -1));
 
@@ -118,6 +120,31 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             Assert.True(control.HasVisibleCaret);
             Assert.True(model.ScrollOffset > 0);
             Assert.Equal((model.Terminal.Rows - 1) * control.CaretRect.Height, control.CaretRect.Y);
+        });
+    }
+
+    [Fact]
+    public Task ScrollSampleControl_KeepsTheCaretAtTheBottomAfterLayout()
+    {
+        return RunInHeadlessSession(async () =>
+        {
+            var sample = new ScrollSampleControl
+            {
+                Width = 320,
+                Height = 120,
+            };
+
+            sample.Measure(new Size(320, 120));
+            sample.Arrange(new Rect(0, 0, 320, 120));
+            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+
+            var grid = Assert.IsType<Grid>(sample.Content);
+            var terminal = Assert.IsType<TerminalControl>(grid.Children.OfType<TerminalControl>().Single());
+            var model = Assert.IsType<TerminalControlModel>(terminal.Model);
+
+            Assert.True(model.ScrollOffset > 0);
+            Assert.True(terminal.HasVisibleCaret);
+            Assert.Equal((model.Terminal.Rows - 1) * terminal.CaretRect.Height, terminal.CaretRect.Y);
         });
     }
 
@@ -254,9 +281,26 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             model.OptionAsMetaKey = false;
 
             byte[]? sent = null;
-            model.UserInput += bytes => sent = bytes;
+            model.UserInput += (_, e) => sent = e.Data.ToArray();
 
-            control.SimulateKeyUp(Key.A, KeyModifiers.Alt, "a");
+            control.SimulateKeyDown(Key.A, KeyModifiers.Alt, "a");
+
+            Assert.NotNull(sent);
+            Assert.Equal("a"u8.ToArray(), sent);
+        });
+    }
+
+    [Fact]
+    public Task TextInput_SendsPrintableCharactersThroughTheModel()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+
+            byte[]? sent = null;
+            model.UserInput += (_, e) => sent = e.Data.ToArray();
+
+            control.SimulateTextInput("a");
 
             Assert.NotNull(sent);
             Assert.Equal("a"u8.ToArray(), sent);
@@ -294,7 +338,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             model.Feed("\u001b[?1006h\u001b[?1000h");
 
             var sent = new List<byte[]>();
-            model.UserInput += bytes => sent.Add(bytes.ToArray());
+            model.UserInput += (_, e) => sent.Add(e.Data.ToArray());
 
             control.SimulatePointerPressed(control.GetCellCenter(2, 0), clickCount: 1);
 
@@ -314,7 +358,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             model.Feed("\u001b[?1006h\u001b[?1000h");
 
             var sent = new List<byte[]>();
-            model.UserInput += bytes => sent.Add(bytes.ToArray());
+            model.UserInput += (_, e) => sent.Add(e.Data.ToArray());
 
             var point = control.GetCellCenter(1, 1);
             control.SimulatePointerPressed(point, clickCount: 1);
@@ -333,7 +377,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             model.Feed("\u001b[?1006h\u001b[?1003h");
 
             var sent = new List<byte[]>();
-            model.UserInput += bytes => sent.Add(bytes.ToArray());
+            model.UserInput += (_, e) => sent.Add(e.Data.ToArray());
 
             control.SimulatePointerPressed(control.GetCellCenter(0, 0), clickCount: 1);
             control.SimulatePointerMoved(control.GetCellCenter(3, 1), isLeftButtonPressed: true);
@@ -489,6 +533,52 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task ContextRequested_DoesNotRaiseInMouseMode_OnStandaloneRightRelease()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            control.RightClickAction = RightClickAction.ContextMenu;
+            model.Feed("\u001b[?1006h\u001b[?1000h");
+
+            TerminalContextRequestedEventArgs? raised = null;
+            control.ContextRequested += (_, args) => raised = args;
+
+            control.SimulatePointerReleased(new Point(18, 12), MouseButton.Right);
+
+            Assert.True(model.IsMouseModeActive);
+            Assert.Null(raised);
+        });
+    }
+
+    [Fact]
+    public Task ContextRequested_DoesNotRaiseInMouseMode_WhenRightPressAndReleaseAreForwarded()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            control.RightClickAction = RightClickAction.ContextMenu;
+            model.Feed("\u001b[?1006h\u001b[?1000h");
+
+            TerminalContextRequestedEventArgs? raised = null;
+            control.ContextRequested += (_, args) => raised = args;
+
+            var sent = new List<byte[]>();
+            model.UserInput += (_, e) => sent.Add(e.Data.ToArray());
+
+            var point = control.GetCellCenter(1, 1);
+            control.SimulatePointerPressed(point, clickCount: 1, button: MouseButton.Right);
+            control.SimulatePointerReleased(point, MouseButton.Right);
+
+            Assert.True(model.IsMouseModeActive);
+            Assert.Null(raised);
+            Assert.NotEmpty(sent);
+            Assert.Contains(sent.Select(Encoding.UTF8.GetString), text => text.Contains("<2;", StringComparison.Ordinal));
+            Assert.Contains(sent.Select(Encoding.UTF8.GetString), text => text.EndsWith("m", StringComparison.Ordinal));
+        });
+    }
+
+    [Fact]
     public Task RightClickAction_CopyOrPaste_CopiesSelection()
     {
         return RunInHeadlessSession(() =>
@@ -511,6 +601,8 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             control.SimulatePointerReleased(new Point(18, 12), MouseButton.Right);
 
             Assert.Equal("Avalonia", clipboardText);
+            Assert.False(control.HasSelection);
+            Assert.False(model.HasSelection);
         });
     }
 
@@ -524,12 +616,61 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             control.ClipboardTextReaderOverride = () => Task.FromResult<string?>("pwd");
 
             byte[]? sent = null;
-            model.UserInput += bytes => sent = bytes;
+            model.UserInput += (_, e) => sent = e.Data.ToArray();
 
             control.SimulatePointerReleased(new Point(18, 12), MouseButton.Right);
 
             Assert.NotNull(sent);
             Assert.Equal("pwd", Encoding.UTF8.GetString(sent!));
+        });
+    }
+
+    [Fact]
+    public Task RightClickAction_CopyOrPaste_DoesNotPasteOnReleaseWhenMouseModeIsActive()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            control.RightClickAction = RightClickAction.CopyOrPaste;
+            control.ClipboardTextReaderOverride = () => Task.FromResult<string?>("pwd");
+            model.Feed("\u001b[?1006h\u001b[?1000h");
+
+            byte[]? sent = null;
+            model.UserInput += (_, e) => sent = e.Data.ToArray();
+
+            control.SimulatePointerReleased(new Point(18, 12), MouseButton.Right);
+
+            Assert.Null(sent);
+        });
+    }
+
+    [Fact]
+    public Task RightClickAction_CopyOrPaste_DoesNotCopyOnReleaseWhenMouseModeIsActive()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            control.RightClickAction = RightClickAction.CopyOrPaste;
+            model.Feed("\u001b[?1006h\u001b[?1000h");
+
+            string? clipboardText = null;
+            control.ClipboardTextWriterOverride = text =>
+            {
+                clipboardText = text;
+                return Task.CompletedTask;
+            };
+
+            TerminalSamples.LoadSelectionSample(model);
+            control.HandleSelectionPressed(control.GetCellCenter(0, 0), KeyModifiers.None, clickCount: 1);
+            control.HandleSelectionMoved(control.GetCellCenter(8, 0));
+            control.HandleSelectionReleased(control.GetCellCenter(8, 0), KeyModifiers.None, clickCount: 1);
+
+            control.SimulatePointerReleased(new Point(18, 12), MouseButton.Right);
+
+            Assert.Null(clipboardText);
+            Assert.True(control.HasSelection);
+            Assert.True(model.HasSelection);
+            Assert.Equal("Avalonia", model.SelectedText);
         });
     }
 
@@ -602,7 +743,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             control.ClipboardTextReaderOverride = () => Task.FromResult<string?>("echo hi");
 
             byte[]? sent = null;
-            model.UserInput += bytes => sent = bytes;
+            model.UserInput += (_, e) => sent = e.Data.ToArray();
 
             control.PasteFromClipboardAsync().GetAwaiter().GetResult();
 
@@ -692,7 +833,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
 
             var before = model.ScrollOffset;
 
-            control.SimulateKeyUp(Key.PageUp);
+            control.SimulateKeyDown(Key.PageUp);
 
             Assert.True(before > 0);
             Assert.Equal(Math.Max(0, before - model.Terminal.Rows), model.ScrollOffset);
@@ -708,10 +849,10 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             var control = CreateControl(out var model, out var scrollBar);
             PopulateScrollback(model);
 
-            control.SimulateKeyUp(Key.PageUp);
+            control.SimulateKeyDown(Key.PageUp);
             var before = model.ScrollOffset;
 
-            control.SimulateKeyUp(Key.PageDown);
+            control.SimulateKeyDown(Key.PageDown);
 
             Assert.True(before >= 0);
             Assert.Equal(Math.Min(model.MaxScrollback, before + model.Terminal.Rows), model.ScrollOffset);
@@ -726,12 +867,12 @@ public sealed class TerminalControlTests : AvaloniaTestBase
         {
             var control = CreateControl(out var model, out _);
             var sent = new List<byte[]>();
-            model.UserInput += bytes => sent.Add(bytes.ToArray());
+            model.UserInput += (_, e) => sent.Add(e.Data.ToArray());
 
-            control.SimulateKeyUp(Key.Up);
-            control.SimulateKeyUp(Key.Delete);
-            control.SimulateKeyUp(Key.OemBackTab);
-            control.SimulateKeyUp(Key.F10);
+            control.SimulateKeyDown(Key.Up);
+            control.SimulateKeyDown(Key.Delete);
+            control.SimulateKeyDown(Key.OemBackTab);
+            control.SimulateKeyDown(Key.F10);
 
             var payloads = sent.Select(Encoding.UTF8.GetString).ToArray();
 
@@ -743,17 +884,203 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task EnterKey_SendsCarriageReturn()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+
+            byte[]? sent = null;
+            model.UserInput += (_, e) => sent = e.Data.ToArray();
+
+            control.SimulateKeyDown(Key.Enter);
+
+            Assert.NotNull(sent);
+            Assert.Equal([0x0D], sent);
+        });
+    }
+
+    [Theory]
+    [InlineData(Key.A, 0x01)]
+    [InlineData(Key.M, 0x0D)]
+    [InlineData(Key.Z, 0x1A)]
+    public Task CtrlLetterKeys_SendAsciiControlCodes(Key key, byte expected)
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+
+            byte[]? sent = null;
+            model.UserInput += (_, e) => sent = e.Data.ToArray();
+
+            control.SimulateKeyDown(key, KeyModifiers.Control);
+
+            Assert.NotNull(sent);
+            Assert.Equal([expected], sent);
+        });
+    }
+
+    [Theory]
+    [InlineData(Key.Space, 0x00)]
+    [InlineData(Key.D2, 0x00)]
+    [InlineData(Key.D3, 0x1B)]
+    [InlineData(Key.D4, 0x1C)]
+    [InlineData(Key.D5, 0x1D)]
+    [InlineData(Key.D6, 0x1E)]
+    [InlineData(Key.D7, 0x1F)]
+    [InlineData(Key.D8, 0x7F)]
+    [InlineData(Key.OemOpenBrackets, 0x1B)]
+    [InlineData(Key.OemBackslash, 0x1C)]
+    [InlineData(Key.OemCloseBrackets, 0x1D)]
+    [InlineData(Key.OemMinus, 0x1F)]
+    public Task CtrlNumberAndPunctuationKeys_SendExpectedControlCodes(Key key, byte expected)
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+
+            byte[]? sent = null;
+            model.UserInput += (_, e) => sent = e.Data.ToArray();
+
+            control.SimulateKeyDown(key, KeyModifiers.Control);
+
+            Assert.NotNull(sent);
+            Assert.Equal([expected], sent);
+        });
+    }
+
+    [Theory]
+    [MemberData(nameof(XtermGeneratedKeyReferenceCases))]
+    public Task XtermGeneratedKeyReference_EmitsExpectedSequence(
+        Key key,
+        KeyModifiers modifiers,
+        string keySymbol,
+        string? preFeed,
+        string expected)
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+
+            if (!string.IsNullOrEmpty(preFeed))
+            {
+                model.Feed(preFeed);
+            }
+
+            byte[]? sent = null;
+            model.UserInput += (_, e) => sent = e.Data.ToArray();
+
+            control.SimulateKeyDown(key, modifiers, keySymbol);
+
+            Assert.NotNull(sent);
+            Assert.Equal(expected, Encoding.UTF8.GetString(sent!));
+        });
+    }
+
+    [Fact]
+    public Task ModifiedArrowKey_UsesModifiedEngineSequence()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+
+            byte[]? sent = null;
+            model.UserInput += (_, e) => sent = e.Data.ToArray();
+
+            control.SimulateKeyDown(Key.Up, KeyModifiers.Control);
+
+            Assert.NotNull(sent);
+
+            var payload = Encoding.UTF8.GetString(sent);
+            Assert.StartsWith("\u001b[", payload);
+            Assert.NotEqual("\u001b[A", payload);
+        });
+    }
+
+    [Fact]
+    public Task AltModifiedSpecialKey_UsesEngineGeneratedSequence()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+
+            byte[]? sent = null;
+            model.UserInput += (_, e) => sent = e.Data.ToArray();
+
+            control.SimulateKeyDown(Key.F4, KeyModifiers.Alt);
+
+            Assert.NotNull(sent);
+
+            var payload = Encoding.UTF8.GetString(sent);
+            Assert.StartsWith("\u001b[", payload);
+        });
+    }
+
+    [Fact]
+    public Task OptionAsMetaKey_True_PrefixesEscapeForAltText()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            model.OptionAsMetaKey = true;
+
+            byte[]? sent = null;
+            model.UserInput += (_, e) => sent = e.Data.ToArray();
+
+            control.SimulateKeyDown(Key.A, KeyModifiers.Alt, "a");
+
+            Assert.NotNull(sent);
+            Assert.Equal("\u001ba", Encoding.UTF8.GetString(sent!));
+        });
+    }
+
+    [Theory]
+    [MemberData(nameof(XtermAltTextReferenceCases))]
+    public Task XtermAltTextReference_EmitsExpectedPayload(bool optionAsMeta, string expected)
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            model.OptionAsMetaKey = optionAsMeta;
+
+            byte[]? sent = null;
+            model.UserInput += (_, e) => sent = e.Data.ToArray();
+
+            control.SimulateKeyDown(Key.A, KeyModifiers.Alt, "a");
+
+            Assert.NotNull(sent);
+            Assert.Equal(expected, Encoding.UTF8.GetString(sent!));
+        });
+    }
+
+    [Fact]
+    public Task TextInput_IgnoresControlCharacters()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+
+            byte[]? sent = null;
+            model.UserInput += (_, e) => sent = e.Data.ToArray();
+
+            control.SimulateTextInput("\r");
+
+            Assert.Null(sent);
+        });
+    }
+
+    [Fact]
     public Task ArrowKeys_UseEngineApplicationCursorSequencesWhenEnabled()
     {
         return RunInHeadlessSession(() =>
         {
             var control = CreateControl(out var model, out _);
             var sent = new List<byte[]>();
-            model.UserInput += bytes => sent.Add(bytes.ToArray());
+            model.UserInput += (_, e) => sent.Add(e.Data.ToArray());
 
             model.Feed("\u001b[?1h");
-            control.SimulateKeyUp(Key.Up);
-            control.SimulateKeyUp(Key.Home);
+            control.SimulateKeyDown(Key.Up);
+            control.SimulateKeyDown(Key.Home);
 
             var payloads = sent.Select(Encoding.UTF8.GetString).ToArray();
 
@@ -769,11 +1096,11 @@ public sealed class TerminalControlTests : AvaloniaTestBase
         {
             var control = CreateControl(out var model, out _);
             var sent = new List<byte[]>();
-            model.UserInput += bytes => sent.Add(bytes.ToArray());
+            model.UserInput += (_, e) => sent.Add(e.Data.ToArray());
 
             model.Feed("\u001b[?1h");
-            control.SimulateKeyUp(Key.PageUp);
-            control.SimulateKeyUp(Key.PageDown);
+            control.SimulateKeyDown(Key.PageUp);
+            control.SimulateKeyDown(Key.PageDown);
 
             var payloads = sent.Select(Encoding.UTF8.GetString).ToArray();
 
@@ -847,6 +1174,35 @@ public sealed class TerminalControlTests : AvaloniaTestBase
         Assert.Equal((2, 3), normalizedThird);
     }
 
+    public static IEnumerable<object[]> XtermGeneratedKeyReferenceCases()
+    {
+        yield return [Key.Up, KeyModifiers.None, string.Empty, null, "\u001b[A"];
+        yield return [Key.Down, KeyModifiers.None, string.Empty, null, "\u001b[B"];
+        yield return [Key.Right, KeyModifiers.None, string.Empty, null, "\u001b[C"];
+        yield return [Key.Left, KeyModifiers.None, string.Empty, null, "\u001b[D"];
+        yield return [Key.Home, KeyModifiers.None, string.Empty, null, "\u001b[H"];
+        yield return [Key.End, KeyModifiers.None, string.Empty, null, "\u001b[F"];
+        yield return [Key.Delete, KeyModifiers.None, string.Empty, null, "\u001b[3~"];
+        yield return [Key.Insert, KeyModifiers.None, string.Empty, null, "\u001b[2~"];
+        yield return [Key.OemBackTab, KeyModifiers.None, string.Empty, null, "\u001b[Z"];
+
+        yield return [Key.Up, KeyModifiers.Control, string.Empty, null, "\u001b[1;5A"];
+        yield return [Key.Down, KeyModifiers.Control, string.Empty, null, "\u001b[1;5B"];
+        yield return [Key.Right, KeyModifiers.Control, string.Empty, null, "\u001b[1;5C"];
+        yield return [Key.Left, KeyModifiers.Control, string.Empty, null, "\u001b[1;5D"];
+
+        const string applicationCursorModeOn = "\u001b[?1h";
+        yield return [Key.Up, KeyModifiers.None, string.Empty, applicationCursorModeOn, "\u001bOA"];
+        yield return [Key.PageUp, KeyModifiers.None, string.Empty, applicationCursorModeOn, "\u001b[5~"];
+        yield return [Key.PageDown, KeyModifiers.None, string.Empty, applicationCursorModeOn, "\u001b[6~"];
+    }
+
+    public static IEnumerable<object[]> XtermAltTextReferenceCases()
+    {
+        yield return [false, "a"];
+        yield return [true, "\u001ba"];
+    }
+
     private static TestableTerminalControl CreateControl(
         out TerminalControlModel model,
         out ScrollBar scrollBar)
@@ -886,7 +1242,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
 
     private sealed class TestableTerminalControl : TerminalControl
     {
-        public void SimulateKeyUp(Key key, KeyModifiers modifiers = KeyModifiers.None, string keySymbol = "")
+        public void SimulateKeyDown(Key key, KeyModifiers modifiers = KeyModifiers.None, string keySymbol = "")
         {
             var args = new KeyEventArgs
             {
@@ -895,7 +1251,17 @@ public sealed class TerminalControlTests : AvaloniaTestBase
                 KeySymbol = keySymbol,
             };
 
-            OnKeyUp(args);
+            OnKeyDown(args);
+        }
+
+        public void SimulateTextInput(string text)
+        {
+            var args = new TextInputEventArgs
+            {
+                Text = text,
+            };
+
+            OnTextInput(args);
         }
 
         public void SimulatePointerWheel(Vector delta)

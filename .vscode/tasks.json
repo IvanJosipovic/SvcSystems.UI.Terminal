@@ -2,7 +2,18 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "XAML Styler: Format KubeUI.Avalonia",
+            "label": "dotnet: format solution",
+            "type": "shell",
+            "command": "dotnet",
+            "args": [
+                "format",
+                "--verbosity",
+                "minimal"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "XAML Styler: Format",
             "type": "shell",
             "command": "dotnet",
             "args": [
@@ -10,14 +21,32 @@
                 "XamlStyler.Console",
                 "-r",
                 "-d",
-                "src\\AvaloniaTerminal",
+                "${workspaceFolder}",
                 "-c",
                 "Settings.XamlStyler"
             ],
-            "options": {
-                "cwd": "${workspaceFolder}"
+            "problemMatcher": []
+        },
+        {
+            "label": "format: all",
+            "dependsOn": [
+                "dotnet: format solution",
+                "XAML Styler: Format"
+            ],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        },
+        {
+            "label": "dotnet: build solution",
+            "type": "shell",
+            "command": "dotnet",
+            "args": [
+                "build"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
             },
-            "group": "build",
             "problemMatcher": []
         }
     ]

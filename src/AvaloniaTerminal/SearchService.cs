@@ -28,14 +28,14 @@ public sealed class SearchService
 
     private SearchSnapshot CreateSnapshot()
     {
-        List<SearchSnapshot.SearchLine> lines = [];
+        List<SearchLine> lines = [];
         StringBuilder text = new();
 
         var buffer = _terminal.Buffer;
         for (int row = 0; row < buffer.Lines.Length; row++)
         {
             string lineText = buffer.Lines[row]?.TranslateToString(trimRight: false) ?? string.Empty;
-            lines.Add(new SearchSnapshot.SearchLine(row, lineText, text.Length));
+            lines.Add(new SearchLine(row, lineText, text.Length));
             text.Append(lineText);
 
             if (row < buffer.Lines.Length - 1)
@@ -50,15 +50,6 @@ public sealed class SearchService
 
 public sealed class SearchSnapshot
 {
-    public sealed class SearchResult
-    {
-        public BufferPoint Start { get; set; }
-
-        public BufferPoint End { get; set; }
-    }
-
-    public sealed record SearchLine(int BufferY, string Text, int StartIndex);
-
     private readonly SearchLine[] _lines;
 
     public SearchSnapshot(SearchLine[] lines, string text)
@@ -71,7 +62,7 @@ public sealed class SearchSnapshot
 
     public string LastSearch { get; private set; } = string.Empty;
 
-    public SearchResult[] LastSearchResults { get; private set; } = [];
+    public IReadOnlyList<SearchResult> LastSearchResults { get; private set; } = [];
 
     public int CurrentSearchResult { get; set; } = -1;
 
@@ -109,19 +100,19 @@ public sealed class SearchSnapshot
             }
         }
 
-        LastSearchResults = results.ToArray();
-        return LastSearchResults.Length;
+        LastSearchResults = results;
+        return LastSearchResults.Count;
     }
 
     public SearchResult? FindNext()
     {
-        if (LastSearchResults.Length == 0)
+        if (LastSearchResults.Count == 0)
         {
             return null;
         }
 
         CurrentSearchResult++;
-        if (CurrentSearchResult >= LastSearchResults.Length)
+        if (CurrentSearchResult >= LastSearchResults.Count)
         {
             CurrentSearchResult = 0;
         }
@@ -131,7 +122,7 @@ public sealed class SearchSnapshot
 
     public SearchResult? FindPrevious()
     {
-        if (LastSearchResults.Length == 0)
+        if (LastSearchResults.Count == 0)
         {
             return null;
         }
@@ -139,9 +130,30 @@ public sealed class SearchSnapshot
         CurrentSearchResult--;
         if (CurrentSearchResult < 0)
         {
-            CurrentSearchResult = LastSearchResults.Length - 1;
+            CurrentSearchResult = LastSearchResults.Count - 1;
         }
 
         return LastSearchResults[CurrentSearchResult];
     }
 }
+
+/// <summary>
+/// Represents a single search hit in the terminal buffer.
+/// </summary>
+public sealed class SearchResult
+{
+    /// <summary>
+    /// Gets the start position of the hit.
+    /// </summary>
+    public BufferPoint Start { get; init; }
+
+    /// <summary>
+    /// Gets the end position of the hit.
+    /// </summary>
+    public BufferPoint End { get; init; }
+}
+
+/// <summary>
+/// Represents a line captured for search indexing.
+/// </summary>
+public sealed record SearchLine(int BufferY, string Text, int StartIndex);

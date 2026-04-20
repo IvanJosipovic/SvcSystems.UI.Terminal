@@ -31,7 +31,7 @@ public sealed class Terminal
         _terminal.TitleChanged += OnTitleChanged;
     }
 
-    public event Action<string>? TitleChanged;
+    public event EventHandler<TitleChangedEventArgs>? TitleChanged;
 
     public EngineTerminal Engine => _terminal;
 
@@ -65,6 +65,8 @@ public sealed class Terminal
 
     public void Feed(byte[] data, int len = -1)
     {
+        ArgumentNullException.ThrowIfNull(data);
+
         int actualLength = len < 0 ? data.Length : Math.Min(len, data.Length);
         if (actualLength <= 0)
         {
@@ -91,7 +93,18 @@ public sealed class Terminal
 
     private void OnTitleChanged(object? sender, XTerm.Events.TerminalEvents.TitleChangeEventArgs e)
     {
-        TitleChanged?.Invoke(e.Title);
+        TitleChanged?.Invoke(this, new TitleChangedEventArgs(e.Title));
     }
 
+}
+
+/// <summary>
+/// Provides the updated terminal title.
+/// </summary>
+public sealed class TitleChangedEventArgs(string title) : EventArgs
+{
+    /// <summary>
+    /// Gets the new terminal title.
+    /// </summary>
+    public string Title { get; } = title;
 }

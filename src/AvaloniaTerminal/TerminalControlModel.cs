@@ -15,7 +15,7 @@ public partial class TerminalControlModel : AvaloniaObject
         // get the dimensions of terminal (cols and rows)
         Terminal = new Terminal(options);
         SearchService = new SearchService(Terminal);
-        Terminal.TitleChanged += SetTerminalTitle;
+        Terminal.TitleChanged += OnTerminalTitleChanged;
         Terminal.Selection.SelectionChanged += HandleSelectionChanged;
 
         // trigger an update of the buffers
@@ -151,14 +151,19 @@ public partial class TerminalControlModel : AvaloniaObject
     /// <summary>
     ///  This event is raised when the terminal size (cols and rows, width, height) has change, due to a NSView frame changed.
     /// </summary>
-    public event Action<int, int, double, double>? SizeChanged;
+    public event EventHandler<TerminalSizeChangedEventArgs>? SizeChanged;
 
     /// <summary>
     /// Invoked to raise input on the control, which should probably be sent to the actual child process or remote connection
     /// </summary>
-    public event Action<byte[]>? UserInput;
+    public event EventHandler<TerminalUserInputEventArgs>? UserInput;
 
-    public Action? UpdateUI;
+    public Action? UpdateUI { get; set; }
+
+    private void OnTerminalTitleChanged(object? sender, TitleChangedEventArgs e)
+    {
+        SetTerminalTitle(e.Title);
+    }
 
     private void SetTerminalTitle(string title)
     {
@@ -173,7 +178,7 @@ public partial class TerminalControlModel : AvaloniaObject
     public void Send(byte[] data)
     {
         EnsureCaretIsVisible();
-        UserInput?.Invoke(data);
+        UserInput?.Invoke(this, new TerminalUserInputEventArgs(data));
     }
 
     public void Resize(double width, double height, double textWidth, double textHeight)
@@ -190,7 +195,7 @@ public partial class TerminalControlModel : AvaloniaObject
         SearchService?.Invalidate();
         UpdateDisplay();
 
-        SizeChanged?.Invoke(cols, rows, width, height);
+        SizeChanged?.Invoke(this, new TerminalSizeChangedEventArgs(cols, rows, width, height));
     }
 
     public void FullBufferUpdate()
@@ -392,7 +397,7 @@ public partial class TerminalControlModel : AvaloniaObject
     public int SelectNextSearchResult()
     {
         var snapshot = SearchService.GetSnapshot();
-        if (snapshot.LastSearchResults.Length == 0)
+        if (snapshot.LastSearchResults.Count == 0)
         {
             return -1;
         }
@@ -407,7 +412,7 @@ public partial class TerminalControlModel : AvaloniaObject
     public int SelectPreviousSearchResult()
     {
         var snapshot = SearchService.GetSnapshot();
-        if (snapshot.LastSearchResults.Length == 0)
+        if (snapshot.LastSearchResults.Count == 0)
         {
             return -1;
         }
@@ -474,7 +479,7 @@ public partial class TerminalControlModel : AvaloniaObject
         UpdateUI?.Invoke();
     }
 
-    private void SelectSearchResult(SearchSnapshot.SearchResult? searchResult, SearchSnapshot snapshot)
+    private void SelectSearchResult(SearchResult? searchResult, SearchSnapshot snapshot)
     {
         ClearSelection();
         if (searchResult == null)
@@ -526,7 +531,7 @@ public partial class TerminalControlModel : AvaloniaObject
 
     private BufferPoint? _softSelectionStart;
 
-    private static IReadOnlyList<ViewportTextRun> BuildRowRuns(BufferLine? line, int viewportCols)
+    private static List<ViewportTextRun> BuildRowRuns(BufferLine? line, int viewportCols)
     {
         List<ViewportTextRun> runs = [];
 
@@ -640,7 +645,7 @@ public partial class TerminalControlModel : AvaloniaObject
     }
 }
 
-internal readonly record struct ViewportRow(int RowIndex, IReadOnlyList<ViewportTextRun> Runs);
+internal readonly record struct ViewportRow(int RowIndex, List<ViewportTextRun> Runs);
 
 internal readonly record struct ViewportTextRun(
     int StartColumn,
@@ -659,3 +664,40 @@ internal readonly record struct ViewportStyleKey(
     bool Italic,
     bool Underline,
     bool Strikethrough);
+
+/// <summary>
+/// Provides the resized terminal dimensions and viewport size.
+/// </summary>
+public sealed class TerminalSizeChangedEventArgs(int cols, int rows, double width, double height) : EventArgs
+{
+    /// <summary>
+    /// Gets the new terminal column count.
+    /// </summary>
+    public int Cols { get; } = cols;
+
+    /// <summary>
+    /// Gets the new terminal row count.
+    /// </summary>
+    public int Rows { get; } = rows;
+
+    /// <summary>
+    /// Gets the measured viewport width.
+    /// </summary>
+    public double Width { get; } = width;
+
+    /// <summary>
+    /// Gets the measured viewport height.
+    /// </summary>
+    public double Height { get; } = height;
+}
+
+/// <summary>
+/// Provides the bytes requested for terminal input.
+/// </summary>
+public sealed class TerminalUserInputEventArgs(ReadOnlyMemory<byte> data) : EventArgs
+{
+    /// <summary>
+    /// Gets the input payload.
+    /// </summary>
+    public ReadOnlyMemory<byte> Data { get; } = data;
+}

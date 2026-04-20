@@ -1,27 +1,25 @@
-<UserControl
+﻿<UserControl
     x:Class="AvaloniaTerminal.Samples.SelectionControl"
-    x:DataType="local:TerminalControlModel"
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:AvaloniaTerminal">
+    xmlns:local="using:AvaloniaTerminal"
+    x:DataType="local:TerminalControlModel">
     <Grid RowDefinitions="Auto,Auto,*">
-        <TextBlock
-            Margin="12,12,12,6"
-            Text="Drag to select. Double-click selects a word. Triple-click selects a row." />
-        <Border
-            Grid.Row="1"
+        <TextBlock Margin="12,12,12,6" Text="Drag to select. Double-click selects a word. Triple-click selects a row." />
+        <Border Grid.Row="1"
             Margin="12,0,12,8"
             Padding="8"
             Background="#11000000"
             CornerRadius="4">
             <StackPanel Spacing="4">
                 <TextBlock FontWeight="SemiBold" Text="Selected Text" />
-                <TextBlock Text="{Binding SelectedText}" TextWrapping="Wrap" Height="55" />
+                <TextBlock
+                    Height="55"
+                    Text="{Binding SelectedText}"
+                    TextWrapping="Wrap" />
             </StackPanel>
         </Border>
-        <local:TerminalControl
-            Name="SelectionTerminalControl"
-            Grid.Row="2"
+        <local:TerminalControl Name="SelectionTerminalControl" Grid.Row="2"
             RightClickAction="CopyOrPaste" />
     </Grid>
 </UserControl>
