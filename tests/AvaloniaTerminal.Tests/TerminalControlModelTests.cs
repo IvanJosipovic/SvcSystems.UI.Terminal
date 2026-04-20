@@ -33,7 +33,7 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
             var model = new TerminalControlModel();
             byte[]? bytes = null;
 
-            model.UserInput += data => bytes = data;
+            model.UserInput += (_, e) => bytes = e.Data.ToArray();
 
             model.Send("abc");
 
@@ -49,7 +49,7 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
         {
             var model = new TerminalControlModel();
             (int cols, int rows, double width, double height)? resize = null;
-            model.SizeChanged += (cols, rows, width, height) => resize = (cols, rows, width, height);
+            model.SizeChanged += (_, e) => resize = (e.Cols, e.Rows, e.Width, e.Height);
             var originalCols = model.Terminal.Cols;
             var originalRows = model.Terminal.Rows;
 
@@ -68,7 +68,7 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
         {
             var model = new TerminalControlModel();
             (int cols, int rows, double width, double height)? resize = null;
-            model.SizeChanged += (cols, rows, width, height) => resize = (cols, rows, width, height);
+            model.SizeChanged += (_, e) => resize = (e.Cols, e.Rows, e.Width, e.Height);
 
             model.Resize(width: 1, height: 1, textWidth: 8, textHeight: 16);
 

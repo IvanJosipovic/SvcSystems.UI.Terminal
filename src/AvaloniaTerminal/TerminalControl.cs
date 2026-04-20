@@ -258,6 +258,7 @@ public partial class TerminalControl : Grid
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
+        ArgumentNullException.ThrowIfNull(change);
         base.OnPropertyChanged(change);
 
         if (change.Property == ModelProperty)
@@ -289,17 +290,8 @@ public partial class TerminalControl : Grid
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
+        ArgumentNullException.ThrowIfNull(e);
         base.OnKeyDown(e);
-
-        if (e.Key == Key.Tab)
-        {
-            e.Handled = true; // Prevent further processing of the Tab key
-        }
-    }
-
-    protected override void OnKeyUp(KeyEventArgs e)
-    {
-        base.OnKeyUp(e);
 
         if (Model == null)
         {
@@ -307,163 +299,62 @@ public partial class TerminalControl : Grid
         }
 
         Model.ClearSelection();
+        bool handled = false;
 
-        if (e.KeyModifiers is KeyModifiers.Control)
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
-            switch (e.Key)
+            if (TrySendGeneratedKey(e.Key, e.KeyModifiers))
             {
-                case Key.A:
-                    Model.Send([0x01]);  // Ctrl+A
-                    break;
-                case Key.B:
-                    Model.Send([0x02]);  // Ctrl+B
-                    break;
-                case Key.C:
-                    Model.Send([0x03]);  // Ctrl+C
-                    break;
-                case Key.D:
-                    Model.Send([0x04]);  // Ctrl+D
-                    break;
-                case Key.E:
-                    Model.Send([0x05]);  // Ctrl+E
-                    break;
-                case Key.F:
-                    Model.Send([0x06]);  // Ctrl+F
-                    break;
-                case Key.G:
-                    Model.Send([0x07]);  // Ctrl+G
-                    break;
-                case Key.H:
-                    Model.Send([0x08]);  // Ctrl+H
-                    break;
-                case Key.I:
-                    Model.Send([0x09]);  // Ctrl+I (Tab)
-                    break;
-                case Key.J:
-                    Model.Send([0x0A]);  // Ctrl+J (Line Feed)
-                    break;
-                case Key.K:
-                    Model.Send([0x0B]);  // Ctrl+K
-                    break;
-                case Key.L:
-                    Model.Send([0x0C]);  // Ctrl+L
-                    break;
-                case Key.M:
-                    Model.Send([0x0D]);  // Ctrl+M (Carriage Return)
-                    break;
-                case Key.N:
-                    Model.Send([0x0E]);  // Ctrl+N
-                    break;
-                case Key.O:
-                    Model.Send([0x0F]);  // Ctrl+O
-                    break;
-                case Key.P:
-                    Model.Send([0x10]);  // Ctrl+P
-                    break;
-                case Key.Q:
-                    Model.Send([0x11]);  // Ctrl+Q
-                    break;
-                case Key.R:
-                    Model.Send([0x12]);  // Ctrl+R
-                    break;
-                case Key.S:
-                    Model.Send([0x13]);  // Ctrl+S
-                    break;
-                case Key.T:
-                    Model.Send([0x14]);  // Ctrl+T
-                    break;
-                case Key.U:
-                    Model.Send([0x15]);  // Ctrl+U
-                    break;
-                case Key.V:
-                    //_ = dc1.Paste(]);
-                    Model.Send([0x16]);  // Ctrl+V
-                    break;
-                case Key.W:
-                    Model.Send([0x17]);  // Ctrl+W
-                    break;
-                case Key.X:
-                    Model.Send([0x18]);  // Ctrl+X
-                    break;
-                case Key.Y:
-                    Model.Send([0x19]);  // Ctrl+Y
-                    break;
-                case Key.Z:
-                    Model.Send([0x1A]);  // Ctrl+Z
-                    break;
-                case Key.D1: // Ctrl+1
-                    Model.Send([0x31]);  // ASCII '1'
-                    break;
-                case Key.D2: // Ctrl+2
-                    Model.Send([0x32]);  // ASCII '2'
-                    break;
-                case Key.D3: // Ctrl+3
-                    Model.Send([0x33]);  // ASCII '3'
-                    break;
-                case Key.D4: // Ctrl+4
-                    Model.Send([0x34]);  // ASCII '4'
-                    break;
-                case Key.D5: // Ctrl+5
-                    Model.Send([0x35]);  // ASCII '5'
-                    break;
-                case Key.D6: // Ctrl+6
-                    Model.Send([0x36]);  // ASCII '6'
-                    break;
-                case Key.D7: // Ctrl+7
-                    Model.Send([0x37]);  // ASCII '7'
-                    break;
-                case Key.D8: // Ctrl+8
-                    Model.Send([0x38]);  // ASCII '8'
-                    break;
-                case Key.D9: // Ctrl+9
-                    Model.Send([0x39]);  // ASCII '9'
-                    break;
-                case Key.D0: // Ctrl+0
-                    Model.Send([0x30]);  // ASCII '0'
-                    break;
-                case Key.OemOpenBrackets: // Ctrl+[
-                    Model.Send([0x1B]);
-                    break;
-                case Key.OemBackslash: // Ctrl+\
-                    Model.Send([0x1C]);
-                    break;
-                case Key.OemCloseBrackets: // Ctrl+]
-                    Model.Send([0x1D]);
-                    break;
-                case Key.Space: // Ctrl+Space
-                    Model.Send([0x00]);
-                    break;
-                case Key.OemMinus: // Ctrl+_
-                    Model.Send([0x1F]);
-                    break;
-                default:
-                    if (!string.IsNullOrEmpty(e.KeySymbol))
-                    {
-                        Model.Send(e.KeySymbol);
-                    }
-                    break;
+                handled = true;
+            }
+            else if (TrySendControlCharacter(e.Key, out var controlCharacter))
+            {
+                Model.Send([controlCharacter]);
+                handled = true;
+            }
+            else
+            {
+                switch (e.Key)
+                {
+                    default:
+                        if (!string.IsNullOrEmpty(e.KeySymbol))
+                        {
+                            Model.Send(e.KeySymbol);
+                            handled = true;
+                        }
+                        break;
+                }
             }
         }
-        if (e.KeyModifiers is KeyModifiers.Alt)
+        else if (e.KeyModifiers.HasFlag(KeyModifiers.Alt))
         {
-            if (Model.OptionAsMetaKey)
+            if (TrySendGeneratedKey(e.Key, e.KeyModifiers))
             {
-                Model.Send([0x1B]);
-                if (!string.IsNullOrEmpty(e.KeySymbol))
-                {
-                    Model.Send(e.KeySymbol);
-                }
+                handled = true;
             }
             else if (!string.IsNullOrEmpty(e.KeySymbol))
             {
-                Model.Send(e.KeySymbol);
+                if (Model.OptionAsMetaKey)
+                {
+                    Model.Send($"\u001b{e.KeySymbol}");
+                }
+                else
+                {
+                    Model.Send(e.KeySymbol);
+                }
+                handled = true;
             }
         }
         else
         {
             switch (e.Key)
             {
+                case Key.Enter:
+                    handled = true;
+                    Model.Send([0x0D]);
+                    break;
                 case Key.PageUp:
+                    handled = true;
                     if (Model.Terminal.Engine.ApplicationCursorKeys)
                     {
                         SendGeneratedKey(XKey.PageUp);
@@ -474,6 +365,7 @@ public partial class TerminalControl : Grid
                     }
                     break;
                 case Key.PageDown:
+                    handled = true;
                     if (Model.Terminal.Engine.ApplicationCursorKeys)
                     {
                         SendGeneratedKey(XKey.PageDown);
@@ -484,26 +376,59 @@ public partial class TerminalControl : Grid
                     }
                     break;
                 case Key.Insert:
+                    if (TrySendGeneratedKey(e.Key, e.KeyModifiers))
+                    {
+                        handled = true;
+                    }
                     break;
                 default:
-                    if (TrySendGeneratedKey(e.Key))
+                    if (TrySendGeneratedKey(e.Key, e.KeyModifiers))
                     {
+                        handled = true;
                         break;
-                    }
-
-                    if (!string.IsNullOrEmpty(e.KeySymbol))
-                    {
-                        Model.Send(e.KeySymbol);
                     }
                     break;
             }
         }
 
+        if (handled)
+        {
+            e.Handled = true;
+        }
+    }
+
+    protected override void OnTextInput(TextInputEventArgs e)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+        base.OnTextInput(e);
+
+        if (Model == null || string.IsNullOrEmpty(e.Text))
+        {
+            return;
+        }
+
+        bool hasPrintableCharacter = false;
+        foreach (char character in e.Text)
+        {
+            if (!char.IsControl(character))
+            {
+                hasPrintableCharacter = true;
+                break;
+            }
+        }
+
+        if (!hasPrintableCharacter)
+        {
+            return;
+        }
+
+        Model.Send(e.Text);
         e.Handled = true;
     }
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
+        ArgumentNullException.ThrowIfNull(e);
         base.OnPointerWheelChanged(e);
 
         if (Model == null)
@@ -525,6 +450,7 @@ public partial class TerminalControl : Grid
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
+        ArgumentNullException.ThrowIfNull(e);
         base.OnPointerPressed(e);
         Focus(NavigationMethod.Pointer);
 
@@ -557,6 +483,7 @@ public partial class TerminalControl : Grid
 
     protected override void OnPointerMoved(PointerEventArgs e)
     {
+        ArgumentNullException.ThrowIfNull(e);
         base.OnPointerMoved(e);
 
         if (TryHandleTerminalMouseMoved(e))
@@ -581,7 +508,17 @@ public partial class TerminalControl : Grid
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
+        ArgumentNullException.ThrowIfNull(e);
         base.OnPointerReleased(e);
+
+        if (e.InitialPressMouseButton == MouseButton.Right && RightClickAction == RightClickAction.CopyOrPaste)
+        {
+            if (HandleRightClickAction(e.GetPosition(this)))
+            {
+                e.Handled = true;
+                return;
+            }
+        }
 
         if (TryHandleTerminalMouseReleased(e))
         {
@@ -820,7 +757,7 @@ public partial class TerminalControl : Grid
                 return false;
             }
             var shaped = TextShaper.Current.ShapeText("a", new TextShaperOptions(glyphTypeface, fontSize));
-            var run = new ShapedTextRun(shaped, new GenericTextRunProperties(typeface, fontSize));
+            using var run = new ShapedTextRun(shaped, new GenericTextRunProperties(typeface, fontSize));
             size = run.Size;
             return true;
         }
@@ -1226,7 +1163,9 @@ public partial class TerminalControl : Grid
             case RightClickAction.CopyOrPaste:
                 if (HasSelection)
                 {
-                    _ = CopySelectionAsync();
+                    var selectedText = CopySelection();
+                    Model?.ClearSelection();
+                    _ = CopyTextToClipboardAsync(selectedText);
                 }
                 else
                 {
@@ -1238,6 +1177,21 @@ public partial class TerminalControl : Grid
             default:
                 RaiseContextRequested(position);
                 return true;
+        }
+    }
+
+    private async Task CopyTextToClipboardAsync(string text)
+    {
+        if (ClipboardTextWriterOverride != null)
+        {
+            await ClipboardTextWriterOverride(text).ConfigureAwait(true);
+            return;
+        }
+
+        var clipboard = ResolveClipboard();
+        if (clipboard != null)
+        {
+            await clipboard.SetTextAsync(text).ConfigureAwait(true);
         }
     }
 
@@ -1362,14 +1316,15 @@ public partial class TerminalControl : Grid
         Model.Send(sequence);
     }
 
-    private bool TrySendGeneratedKey(Key key)
+    private bool TrySendGeneratedKey(Key key, AvaloniaModifiers modifiers)
     {
         if (Model == null || !TryMapKey(key, out var mappedKey, out var extraModifiers))
         {
             return false;
         }
 
-        SendGeneratedKey(mappedKey, extraModifiers);
+        var filteredModifiers = modifiers & (AvaloniaModifiers.Shift | AvaloniaModifiers.Alt | AvaloniaModifiers.Control);
+        SendGeneratedKey(mappedKey, extraModifiers | ToXTermModifiers(filteredModifiers));
         return true;
     }
 
@@ -1401,6 +1356,9 @@ public partial class TerminalControl : Grid
                 return true;
             case Key.Delete:
                 mappedKey = XKey.Delete;
+                return true;
+            case Key.Insert:
+                mappedKey = XKey.Insert;
                 return true;
             case Key.Back:
                 mappedKey = XKey.Backspace;
@@ -1462,6 +1420,48 @@ public partial class TerminalControl : Grid
                 return true;
             default:
                 mappedKey = default;
+                return false;
+        }
+    }
+
+    private static bool TrySendControlCharacter(Key key, out byte controlCharacter)
+    {
+        if (key >= Key.A && key <= Key.Z)
+        {
+            controlCharacter = (byte)(key - Key.A + 1);
+            return true;
+        }
+
+        switch (key)
+        {
+            case Key.Space:
+            case Key.D2:
+                controlCharacter = 0x00;
+                return true;
+            case Key.D3:
+            case Key.OemOpenBrackets:
+                controlCharacter = 0x1B;
+                return true;
+            case Key.D4:
+            case Key.OemBackslash:
+                controlCharacter = 0x1C;
+                return true;
+            case Key.D5:
+            case Key.OemCloseBrackets:
+                controlCharacter = 0x1D;
+                return true;
+            case Key.D6:
+                controlCharacter = 0x1E;
+                return true;
+            case Key.D7:
+            case Key.OemMinus:
+                controlCharacter = 0x1F;
+                return true;
+            case Key.D8:
+                controlCharacter = 0x7F;
+                return true;
+            default:
+                controlCharacter = 0;
                 return false;
         }
     }

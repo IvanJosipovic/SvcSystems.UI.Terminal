@@ -72,9 +72,9 @@ public partial class ShellControl : UserControl
         return redirectedSession;
     }
 
-    private void OnUserInput(byte[] input)
+    private void OnUserInput(object? sender, TerminalUserInputEventArgs e)
     {
-        _session?.Send(input);
+        _session?.Send(e.Data.ToArray());
     }
 
     private void OnSessionDataReceived(byte[] data)
@@ -87,9 +87,9 @@ public partial class ShellControl : UserControl
         Dispatcher.UIThread.Post(() => _shellModel.Feed($"\r\n[Shell exited with code {exitCode}]\r\n"));
     }
 
-    private void OnTerminalSizeChanged(int cols, int rows, double width, double height)
+    private void OnTerminalSizeChanged(object? sender, TerminalSizeChangedEventArgs e)
     {
-        ApplyShellResize(cols, rows);
+        ApplyShellResize(e.Cols, e.Rows);
     }
 
     protected override void OnDetachedFromVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)

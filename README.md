@@ -81,7 +81,7 @@ _terminal.Feed("Hello from AvaloniaTerminal\r\n");
 Receive user input:
 
 ```csharp
-_terminal.UserInput += bytes =>
+_terminal.UserInput += (_, e) =>
 {
     // Send bytes to a pty, process stdin, socket, ssh session, etc.
 };
@@ -101,9 +101,10 @@ Example with a local process or remote session:
 ```csharp
 var model = new TerminalControlModel();
 
-model.UserInput += bytes =>
+model.UserInput += (_, e) =>
 {
-    process.StandardInput.BaseStream.Write(bytes, 0, bytes.Length);
+    var bytes = e.Data;
+    process.StandardInput.BaseStream.Write(bytes.Span);
     process.StandardInput.BaseStream.Flush();
 };
 

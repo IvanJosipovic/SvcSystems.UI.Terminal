@@ -5,7 +5,7 @@ namespace AvaloniaTerminal.Samples;
 
 public partial class ScrollSampleControl : UserControl
 {
-    private readonly TerminalControlModel _scrollSampleModel = TerminalSamples.CreateScrollSampleModel();
+    private readonly TerminalControlModel _scrollSampleModel = new();
     private bool _scrollSampleQueued;
 
     public ScrollSampleControl()
