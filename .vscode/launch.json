@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch AvaloniaTerminal Desktop",
+            "type": "coreclr",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/AvaloniaTerminal.Desktop/bin/Debug/net10.0/AvaloniaTerminal.Desktop.dll",
+            "cwd": "${workspaceFolder}/src/AvaloniaTerminal.Desktop",
+            "console": "integratedTerminal",
+            "preLaunchTask": "dotnet: build solution"
+        }
+    ]
+}

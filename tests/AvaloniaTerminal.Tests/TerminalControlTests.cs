@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
@@ -118,6 +119,30 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             Assert.True(control.HasVisibleCaret);
             Assert.True(model.ScrollOffset > 0);
             Assert.Equal((model.Terminal.Rows - 1) * control.CaretRect.Height, control.CaretRect.Y);
+        });
+    }
+
+    [Fact]
+    public Task ScrollSampleControl_KeepsTheCaretAtTheBottomAfterLayout()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var sample = new ScrollSampleControl
+            {
+                Width = 320,
+                Height = 120,
+            };
+
+            sample.Measure(new Size(320, 120));
+            sample.Arrange(new Rect(0, 0, 320, 120));
+
+            var grid = Assert.IsType<Grid>(sample.Content);
+            var terminal = Assert.IsType<TerminalControl>(grid.Children.OfType<TerminalControl>().Single());
+            var model = Assert.IsType<TerminalControlModel>(terminal.Model);
+
+            Assert.True(model.ScrollOffset > 0);
+            Assert.True(terminal.HasVisibleCaret);
+            Assert.Equal((model.Terminal.Rows - 1) * terminal.CaretRect.Height, terminal.CaretRect.Y);
         });
     }
 
