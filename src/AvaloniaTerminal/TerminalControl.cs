@@ -511,15 +511,6 @@ public partial class TerminalControl : Grid
         ArgumentNullException.ThrowIfNull(e);
         base.OnPointerReleased(e);
 
-        if (e.InitialPressMouseButton == MouseButton.Right && RightClickAction == RightClickAction.CopyOrPaste)
-        {
-            if (HandleRightClickAction(e.GetPosition(this)))
-            {
-                e.Handled = true;
-                return;
-            }
-        }
-
         if (TryHandleTerminalMouseReleased(e))
         {
             e.Handled = true;

@@ -533,6 +533,52 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task ContextRequested_DoesNotRaiseInMouseMode_OnStandaloneRightRelease()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            control.RightClickAction = RightClickAction.ContextMenu;
+            model.Feed("\u001b[?1006h\u001b[?1000h");
+
+            TerminalContextRequestedEventArgs? raised = null;
+            control.ContextRequested += (_, args) => raised = args;
+
+            control.SimulatePointerReleased(new Point(18, 12), MouseButton.Right);
+
+            Assert.True(model.IsMouseModeActive);
+            Assert.Null(raised);
+        });
+    }
+
+    [Fact]
+    public Task ContextRequested_DoesNotRaiseInMouseMode_WhenRightPressAndReleaseAreForwarded()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            control.RightClickAction = RightClickAction.ContextMenu;
+            model.Feed("\u001b[?1006h\u001b[?1000h");
+
+            TerminalContextRequestedEventArgs? raised = null;
+            control.ContextRequested += (_, args) => raised = args;
+
+            var sent = new List<byte[]>();
+            model.UserInput += (_, e) => sent.Add(e.Data.ToArray());
+
+            var point = control.GetCellCenter(1, 1);
+            control.SimulatePointerPressed(point, clickCount: 1, button: MouseButton.Right);
+            control.SimulatePointerReleased(point, MouseButton.Right);
+
+            Assert.True(model.IsMouseModeActive);
+            Assert.Null(raised);
+            Assert.NotEmpty(sent);
+            Assert.Contains(sent.Select(Encoding.UTF8.GetString), text => text.Contains("<2;", StringComparison.Ordinal));
+            Assert.Contains(sent.Select(Encoding.UTF8.GetString), text => text.EndsWith("m", StringComparison.Ordinal));
+        });
+    }
+
+    [Fact]
     public Task RightClickAction_CopyOrPaste_CopiesSelection()
     {
         return RunInHeadlessSession(() =>
@@ -580,7 +626,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     }
 
     [Fact]
-    public Task RightClickAction_CopyOrPaste_PastesWhenMouseModeIsActive()
+    public Task RightClickAction_CopyOrPaste_DoesNotPasteOnReleaseWhenMouseModeIsActive()
     {
         return RunInHeadlessSession(() =>
         {
@@ -594,13 +640,12 @@ public sealed class TerminalControlTests : AvaloniaTestBase
 
             control.SimulatePointerReleased(new Point(18, 12), MouseButton.Right);
 
-            Assert.NotNull(sent);
-            Assert.Equal("pwd", Encoding.UTF8.GetString(sent!));
+            Assert.Null(sent);
         });
     }
 
     [Fact]
-    public Task RightClickAction_CopyOrPaste_CopiesWhenMouseModeIsActive()
+    public Task RightClickAction_CopyOrPaste_DoesNotCopyOnReleaseWhenMouseModeIsActive()
     {
         return RunInHeadlessSession(() =>
         {
@@ -622,9 +667,10 @@ public sealed class TerminalControlTests : AvaloniaTestBase
 
             control.SimulatePointerReleased(new Point(18, 12), MouseButton.Right);
 
-            Assert.Equal("Avalonia", clipboardText);
-            Assert.False(control.HasSelection);
-            Assert.False(model.HasSelection);
+            Assert.Null(clipboardText);
+            Assert.True(control.HasSelection);
+            Assert.True(model.HasSelection);
+            Assert.Equal("Avalonia", model.SelectedText);
         });
     }
 
