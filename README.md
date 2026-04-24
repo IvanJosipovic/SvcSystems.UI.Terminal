@@ -3,7 +3,7 @@
 [![Nuget (with prereleases)](https://img.shields.io/nuget/dt/SvcSystems.UI.Terminal.svg?style=flat-square)](https://www.nuget.org/packages/SvcSystems.UI.Terminal)
 [![codecov](https://codecov.io/gh/IvanJosipovic/SvcSystems.UI.Terminal/graph/badge.svg?token=cy0a3RcojP)](https://codecov.io/gh/IvanJosipovic/SvcSystems.UI.Terminal)
 
-Avalonia terminal control built on top of [XTerm.NET](https://github.com/tomlm/XTerm.NET).
+Terminal Control for Avalonia built on top of [XTerm.NET](https://github.com/tomlm/XTerm.NET).
 
 ![screenshot](https://raw.githubusercontent.com/IvanJosipovic/SvcSystems.UI.Terminal/refs/heads/alpha/docs/Screenshot.png)
 
