@@ -1,11 +1,11 @@
-# AvaloniaTerminal
-[![Nuget (with prereleases)](https://img.shields.io/nuget/vpre/AvaloniaTerminal.svg?style=flat-square)](https://www.nuget.org/packages/AvaloniaTerminal)
-[![Nuget (with prereleases)](https://img.shields.io/nuget/dt/AvaloniaTerminal.svg?style=flat-square)](https://www.nuget.org/packages/AvaloniaTerminal)
-[![codecov](https://codecov.io/gh/IvanJosipovic/AvaloniaTerminal/graph/badge.svg?token=cy0a3RcojP)](https://codecov.io/gh/IvanJosipovic/AvaloniaTerminal)
+# SvcSystems.UI.Terminal
+[![Nuget (with prereleases)](https://img.shields.io/nuget/vpre/SvcSystems.UI.Terminal.svg?style=flat-square)](https://www.nuget.org/packages/SvcSystems.UI.Terminal)
+[![Nuget (with prereleases)](https://img.shields.io/nuget/dt/SvcSystems.UI.Terminal.svg?style=flat-square)](https://www.nuget.org/packages/SvcSystems.UI.Terminal)
+[![codecov](https://codecov.io/gh/IvanJosipovic/SvcSystems.UI.Terminal/graph/badge.svg?token=cy0a3RcojP)](https://codecov.io/gh/IvanJosipovic/SvcSystems.UI.Terminal)
 
-Avalonia terminal control built on top of [XTerm.NET](https://github.com/tomlm/XTerm.NET).
+Terminal Control for Avalonia built on top of [XTerm.NET](https://github.com/tomlm/XTerm.NET).
 
-![screenshot](https://raw.githubusercontent.com/IvanJosipovic/AvaloniaTerminal/refs/heads/alpha/docs/Screenshot.png)
+![screenshot](https://raw.githubusercontent.com/IvanJosipovic/SvcSystems.UI.Terminal/refs/heads/alpha/docs/Screenshot.png)
 
 ## Features
 
@@ -27,7 +27,7 @@ Avalonia terminal control built on top of [XTerm.NET](https://github.com/tomlm/X
 ## Install
 
 ```bash
-dotnet add package AvaloniaTerminal
+dotnet add package SvcSystems.UI.Terminal
 ```
 
 ## Basic Usage
@@ -38,7 +38,7 @@ Add the control in XAML:
 <Window
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:terminal="using:AvaloniaTerminal">
+    xmlns:terminal="using:SvcSystems.UI.Terminal">
     <terminal:TerminalControl Name="TerminalView" />
 </Window>
 ```
@@ -62,7 +62,7 @@ public partial class MainWindow : Window
 }
 ```
 
-You can also pass `AvaloniaTerminal.TerminalOptions` when you need non-default terminal behavior:
+You can also pass `SvcSystems.UI.Terminal.TerminalOptions` when you need non-default terminal behavior:
 
 ```csharp
 var model = new TerminalControlModel(new TerminalOptions
@@ -76,7 +76,7 @@ var model = new TerminalControlModel(new TerminalOptions
 Feed terminal output:
 
 ```csharp
-_terminal.Feed("Hello from AvaloniaTerminal\r\n");
+_terminal.Feed("Hello from SvcSystems.UI.Terminal\r\n");
 ```
 
 Receive user input:
@@ -257,40 +257,40 @@ This is controlled by the terminal app, not by the Avalonia host. If an app does
 
 The library defines its default terminal styling in:
 
-- [`src/AvaloniaTerminal/Styles/Colors.axaml`](src/AvaloniaTerminal/Styles/Colors.axaml)
+- [`src/SvcSystems.UI.Terminal/Styles/Colors.axaml`](src/SvcSystems.UI.Terminal/Styles/Colors.axaml)
 
 The desktop sample includes those resources automatically. If you host the control yourself, include the style resource in your application:
 
 ```xml
 <Application.Styles>
-    <StyleInclude Source="avares://AvaloniaTerminal/Styles/Colors.axaml" />
+    <StyleInclude Source="avares://SvcSystems.UI.Terminal/Styles/Colors.axaml" />
 </Application.Styles>
 ```
 
 `Colors.axaml` provides:
 
 - the default `TerminalControl` font settings
-- the exported 256-color terminal palette as `AvaloniaTerminalColor0` through `AvaloniaTerminalColor255`
+- the exported 256-color terminal palette as `SvcSystems.UI.TerminalColor0` through `SvcSystems.UI.TerminalColor255`
 - resource keys that the control reads for optional caret and selection overrides
 
 Available resource keys:
 
-- `AvaloniaTerminalFontFamily`
-- `AvaloniaTerminalFontSize`
-- `AvaloniaTerminalCaretBrush`
-- `AvaloniaTerminalSelectionBrush`
-- `AvaloniaTerminalColor0` ... `AvaloniaTerminalColor255`
+- `SvcSystems.UI.TerminalFontFamily`
+- `SvcSystems.UI.TerminalFontSize`
+- `SvcSystems.UI.TerminalCaretBrush`
+- `SvcSystems.UI.TerminalSelectionBrush`
+- `SvcSystems.UI.TerminalColor0` ... `SvcSystems.UI.TerminalColor255`
 
 You can override those resources at the application level to align the terminal with your app theme:
 
 ```xml
 <Application.Resources>
-    <x:String x:Key="AvaloniaTerminalFontFamily">Fira Code</x:String>
-    <x:Double x:Key="AvaloniaTerminalFontSize">14</x:Double>
-    <SolidColorBrush x:Key="AvaloniaTerminalCaretBrush" Color="#FFB000" />
-    <SolidColorBrush x:Key="AvaloniaTerminalSelectionBrush" Color="#4060A0FF" />
-    <SolidColorBrush x:Key="AvaloniaTerminalColor0" Color="#111111" />
-    <SolidColorBrush x:Key="AvaloniaTerminalColor15" Color="#F5F5F5" />
+    <x:String x:Key="SvcSystems.UI.TerminalFontFamily">Fira Code</x:String>
+    <x:Double x:Key="SvcSystems.UI.TerminalFontSize">14</x:Double>
+    <SolidColorBrush x:Key="SvcSystems.UI.TerminalCaretBrush" Color="#FFB000" />
+    <SolidColorBrush x:Key="SvcSystems.UI.TerminalSelectionBrush" Color="#4060A0FF" />
+    <SolidColorBrush x:Key="SvcSystems.UI.TerminalColor0" Color="#111111" />
+    <SolidColorBrush x:Key="SvcSystems.UI.TerminalColor15" Color="#F5F5F5" />
 </Application.Resources>
 ```
 
@@ -315,7 +315,7 @@ Notes:
 
 - font defaults come from `Colors.axaml` and can be overridden by application resources
 - caret and selection use the control properties first, then the corresponding application resources, then the built-in fallback behavior
-- ANSI foreground/background rendering uses the exported `AvaloniaTerminalColor*` resource keys, so hosts can replace the palette without changing library code
+- ANSI foreground/background rendering uses the exported `SvcSystems.UI.TerminalColor*` resource keys, so hosts can replace the palette without changing library code
 
 ## Samples
 
@@ -333,18 +333,18 @@ Current sample tabs:
 
 Desktop sample host:
 
-- [`src/AvaloniaTerminal.Desktop/Views/MainWindow.axaml`](src/AvaloniaTerminal.Desktop/Views/MainWindow.axaml)
+- [`src/SvcSystems.UI.Terminal.Desktop/Views/MainWindow.axaml`](src/SvcSystems.UI.Terminal.Desktop/Views/MainWindow.axaml)
 
 Shared sample controls:
 
-- [`src/AvaloniaTerminal.Samples/ShellControl.axaml`](src/AvaloniaTerminal.Samples/ShellControl.axaml)
-- [`src/AvaloniaTerminal.Samples/ScrollSampleControl.axaml`](src/AvaloniaTerminal.Samples/ScrollSampleControl.axaml)
-- [`src/AvaloniaTerminal.Samples/SelectionControl.axaml`](src/AvaloniaTerminal.Samples/SelectionControl.axaml)
+- [`src/SvcSystems.UI.Terminal.Samples/ShellControl.axaml`](src/SvcSystems.UI.Terminal.Samples/ShellControl.axaml)
+- [`src/SvcSystems.UI.Terminal.Samples/ScrollSampleControl.axaml`](src/SvcSystems.UI.Terminal.Samples/ScrollSampleControl.axaml)
+- [`src/SvcSystems.UI.Terminal.Samples/SelectionControl.axaml`](src/SvcSystems.UI.Terminal.Samples/SelectionControl.axaml)
 
 ## Running The Sample App
 
 ```bash
-dotnet run --project src/AvaloniaTerminal.Desktop
+dotnet run --project src/SvcSystems.UI.Terminal.Desktop
 ```
 
 ### Sample shell notes
@@ -358,5 +358,5 @@ dotnet run --project src/AvaloniaTerminal.Desktop
 The repo has headless tests covering terminal behavior without needing a visible desktop session.
 
 ```bash
-dotnet test --project tests/AvaloniaTerminal.Tests/AvaloniaTerminal.Tests.csproj -f net10.0
+dotnet test --project tests/SvcSystems.UI.Terminal.Tests/SvcSystems.UI.Terminal.Tests.csproj -f net10.0
 ```

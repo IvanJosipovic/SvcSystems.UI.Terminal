@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".releaserc.json" />
+    <File Path="global.json" />
+    <File Path="README.md" />
+  </Folder>
+  <Project Path="src/SvcSystems.UI.Terminal.Desktop/SvcSystems.UI.Terminal.Desktop.csproj" />
+  <Project Path="src/SvcSystems.UI.Terminal.Samples/SvcSystems.UI.Terminal.Samples.csproj" />
+  <Project Path="src/SvcSystems.UI.Terminal/SvcSystems.UI.Terminal.csproj" />
+  <Project Path="tests/SvcSystems.UI.Terminal.Tests/SvcSystems.UI.Terminal.Tests.csproj" />
+</Solution>
