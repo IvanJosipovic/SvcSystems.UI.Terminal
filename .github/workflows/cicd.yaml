@@ -1,0 +1,54 @@
+name: CICD
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'main'
+      - 'alpha'
+      - 'beta'
+
+jobs:
+  get-version:
+    permissions:
+      contents: write
+    uses: IvanJosipovic/templates/.github/workflows/create-release.yaml@main
+    with:
+      dry_run: true
+
+  build-test:
+    needs: get-version
+    permissions:
+      contents: read
+    uses: IvanJosipovic/templates/.github/workflows/csharp-build-test.yaml@main
+    with:
+      version: ${{ needs.get-version.outputs.new_release_version }}
+
+  create-release:
+    needs: build-test
+    permissions:
+      contents: write
+      actions: write
+      checks: write
+      issues: write
+      pull-requests: write
+    uses: IvanJosipovic/templates/.github/workflows/create-release.yaml@main
+    with:
+      dry_run: false
+
+  publish-nuget:
+    name: Publish NuGet
+    needs: create-release
+    if: needs.create-release.outputs.new_release_published == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+    - name: NuGet login
+      uses: NuGet/login@v1
+      id: login
+      with:
+        user: IvanJosipovic
+    - uses: IvanJosipovic/templates/.github/actions/csharp-publish-nuget@main
+      env:
+        NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}

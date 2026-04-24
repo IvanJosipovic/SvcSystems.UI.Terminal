@@ -1,0 +1,53 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "dotnet: format solution",
+            "type": "shell",
+            "command": "dotnet",
+            "args": [
+                "format",
+                "--verbosity",
+                "minimal"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "XAML Styler: Format",
+            "type": "shell",
+            "command": "dotnet",
+            "args": [
+                "dnx",
+                "XamlStyler.Console",
+                "-r",
+                "-d",
+                "${workspaceFolder}",
+                "-c",
+                "Settings.XamlStyler"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "format: all",
+            "dependsOn": [
+                "dotnet: format solution",
+                "XAML Styler: Format"
+            ],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        },
+        {
+            "label": "dotnet: build solution",
+            "type": "shell",
+            "command": "dotnet",
+            "args": [
+                "build"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": []
+        }
+    ]
+}

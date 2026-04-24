@@ -1,0 +1,11 @@
+﻿<UserControl
+    x:Class="AvaloniaTerminal.Samples.ScrollSampleControl"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:AvaloniaTerminal">
+    <Grid RowDefinitions="Auto,*">
+        <TextBlock Margin="12,12,12,8" Text="Scrollable sample with 500 preloaded lines." />
+        <local:TerminalControl Name="ScrollTerminalControl" Grid.Row="1"
+            RightClickAction="CopyOrPaste" />
+    </Grid>
+</UserControl>

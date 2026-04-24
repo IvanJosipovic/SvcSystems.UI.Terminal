@@ -1,0 +1,12 @@
+﻿<Application
+    x:Class="AvaloniaTerminal.App"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    RequestedThemeVariant="Default">
+    <!--  "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options.  -->
+
+    <Application.Styles>
+        <FluentTheme />
+        <StyleInclude Source="avares://AvaloniaTerminal/Styles/Colors.axaml" />
+    </Application.Styles>
+</Application>
