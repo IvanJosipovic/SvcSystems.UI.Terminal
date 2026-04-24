@@ -1,6 +1,7 @@
 # AvaloniaTerminal
 [![Nuget (with prereleases)](https://img.shields.io/nuget/vpre/AvaloniaTerminal.svg?style=flat-square)](https://www.nuget.org/packages/AvaloniaTerminal)
 [![Nuget (with prereleases)](https://img.shields.io/nuget/dt/AvaloniaTerminal.svg?style=flat-square)](https://www.nuget.org/packages/AvaloniaTerminal)
+[![codecov](https://codecov.io/gh/IvanJosipovic/AvaloniaTerminal/graph/badge.svg?token=cy0a3RcojP)](https://codecov.io/gh/IvanJosipovic/AvaloniaTerminal)
 
 Avalonia terminal control built on top of [XTerm.NET](https://github.com/tomlm/XTerm.NET).
 
