@@ -31,10 +31,10 @@ Docker
 ## 2) Architecture
 
 ### Layering
-- Avalonia.Terminal contains the terminal control code
-- AvaloniaTerminal uses the XTerm.NET package for terminal emulation
-- AvaloniaTerminal.Desktop is the sample project
-- AvaloniaTerminal.Tests is the test project
+- SvcSystems.UI.Terminal contains the terminal control code
+- SvcSystems.UI.Terminal uses the XTerm.NET package for terminal emulation
+- SvcSystems.UI.Terminal.Desktop is the sample project
+- SvcSystems.UI.Terminal.Tests is the test project
 
 ## 3) Avalonia UI best practices (aligned with Avalonia codebase)
 
