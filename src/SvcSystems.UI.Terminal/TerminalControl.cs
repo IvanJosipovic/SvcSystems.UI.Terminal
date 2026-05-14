@@ -775,6 +775,8 @@ public partial class TerminalControl : Grid
 
     internal IBrush CaretBrushForTests => ResolveCaretBrush();
 
+    internal IReadOnlyList<Rect> SelectionRectsForTests => [.. GetSelectionRects()];
+
     internal Point GetCellCenter(int col, int row)
     {
         return new Point(
