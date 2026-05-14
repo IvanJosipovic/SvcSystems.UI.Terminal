@@ -204,7 +204,7 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
     }
 
     [Fact]
-    public Task SelectionProperties_ReflectEngineSelectionText()
+    public Task SelectionProperties_ReflectTrackedSelectionText()
     {
         return RunInHeadlessSession(() =>
         {
@@ -222,6 +222,36 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
 
             Assert.False(model.HasSelection);
             Assert.Equal(string.Empty, model.SelectedText);
+        });
+    }
+
+    [Fact]
+    public Task SelectionText_RemainsAnchoredWhenViewportScrolls()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+            model.Resize(width: 900, height: 240, textWidth: 8, textHeight: 16);
+            TerminalSamples.LoadScrollSample(model);
+
+            const int selectedRow = 2;
+            const int startColumn = 5;
+            const int endColumnExclusive = 9;
+            var expectedSelectedText = GetCellText(model, startColumn, selectedRow) +
+                GetCellText(model, startColumn + 1, selectedRow) +
+                GetCellText(model, startColumn + 2, selectedRow) +
+                GetCellText(model, startColumn + 3, selectedRow);
+
+            model.SetSoftSelectionStart(selectedRow, startColumn);
+            model.StartSelectionFromSoftStart();
+            model.DragExtendSelection(selectedRow, endColumnExclusive);
+
+            Assert.Equal(expectedSelectedText, model.SelectedText);
+
+            model.HandlePointerWheel(new Avalonia.Vector(0, 1));
+
+            Assert.Equal(expectedSelectedText, model.SelectedText);
+            Assert.True(model.HasSelection);
         });
     }
 

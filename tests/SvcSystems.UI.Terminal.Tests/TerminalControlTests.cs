@@ -126,17 +126,17 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     [Fact]
     public Task ScrollSampleControl_KeepsTheCaretAtTheBottomAfterLayout()
     {
-        return RunInHeadlessSession(async () =>
+        return RunInHeadlessSession(() =>
         {
             var sample = new ScrollSampleControl
             {
-                Width = 320,
-                Height = 120,
+                Width = 900,
+                Height = 240,
             };
 
-            sample.Measure(new Size(320, 120));
-            sample.Arrange(new Rect(0, 0, 320, 120));
-            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
+            sample.Measure(new Size(900, 240));
+            sample.Arrange(new Rect(0, 0, 900, 240));
+            Dispatcher.UIThread.RunJobs();
 
             var grid = Assert.IsType<Grid>(sample.Content);
             var terminal = Assert.IsType<TerminalControl>(grid.Children.OfType<TerminalControl>().Single());
@@ -145,6 +145,87 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             Assert.True(model.ScrollOffset > 0);
             Assert.True(terminal.HasVisibleCaret);
             Assert.Equal((model.Terminal.Rows - 1) * terminal.CaretRect.Height, terminal.CaretRect.Y);
+        });
+    }
+
+    [Fact]
+    public Task ScrollSampleControl_WheelScroll_KeepsSelectionAnchoredToOriginalBufferLine()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var sample = new ScrollSampleControl
+            {
+                Width = 900,
+                Height = 240,
+            };
+
+            sample.Measure(new Size(900, 240));
+            sample.Arrange(new Rect(0, 0, 900, 240));
+            Dispatcher.UIThread.RunJobs();
+
+            var terminal = GetScrollSampleTerminal(sample, out var model);
+            const int selectedRow = 2;
+            const int selectionStartColumn = 5;
+            const int selectionEndColumnExclusive = 9;
+            var selectedLine = GetViewportRowText(model, selectedRow);
+            var expectedSelectedText = selectedLine[selectionStartColumn..selectionEndColumnExclusive];
+            var adjacentViewportLineAfterScroll = GetViewportRowText(model, selectedRow - 1)[selectionStartColumn..selectionEndColumnExclusive];
+            var beforeScrollOffset = model.ScrollOffset;
+
+            Assert.NotEqual(expectedSelectedText, adjacentViewportLineAfterScroll);
+
+            terminal.HandleSelectionPressed(terminal.GetCellCenter(selectionStartColumn, selectedRow), KeyModifiers.None, clickCount: 1);
+            terminal.HandleSelectionMoved(terminal.GetCellCenter(selectionEndColumnExclusive, selectedRow));
+            terminal.HandleSelectionReleased(terminal.GetCellCenter(selectionEndColumnExclusive, selectedRow), KeyModifiers.None, clickCount: 1);
+
+            var beforeScrollRects = terminal.SelectionRectsForTests;
+            var beforeScrollTop = Assert.Single(beforeScrollRects).Y;
+            Assert.Equal(expectedSelectedText, model.SelectedText);
+
+            model.HandlePointerWheel(new Vector(0, 1));
+
+            Assert.Equal(beforeScrollOffset - 1, model.ScrollOffset);
+            Assert.Equal(selectedLine, GetViewportRowText(model, selectedRow + 1));
+
+            var afterScrollRects = terminal.SelectionRectsForTests;
+            var afterScrollTop = Assert.Single(afterScrollRects).Y;
+            Assert.Equal(expectedSelectedText, model.SelectedText);
+            Assert.True(afterScrollTop > beforeScrollTop);
+        });
+    }
+
+    [Fact]
+    public Task ScrollSampleControl_WheelScroll_WhenSelectionLeavesViewport_PreservesSelectedTextWithoutThrowing()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var sample = new ScrollSampleControl
+            {
+                Width = 900,
+                Height = 240,
+            };
+
+            sample.Measure(new Size(900, 240));
+            sample.Arrange(new Rect(0, 0, 900, 240));
+            Dispatcher.UIThread.RunJobs();
+
+            var terminal = GetScrollSampleTerminal(sample, out var model);
+            var selectedRow = model.Terminal.Rows - 1;
+            const int selectionStartColumn = 5;
+            const int selectionEndColumnExclusive = 9;
+            var expectedSelectedText = GetViewportRowText(model, selectedRow)[selectionStartColumn..selectionEndColumnExclusive];
+
+            terminal.HandleSelectionPressed(terminal.GetCellCenter(selectionStartColumn, selectedRow), KeyModifiers.None, clickCount: 1);
+            terminal.HandleSelectionMoved(terminal.GetCellCenter(selectionEndColumnExclusive, selectedRow));
+            terminal.HandleSelectionReleased(terminal.GetCellCenter(selectionEndColumnExclusive, selectedRow), KeyModifiers.None, clickCount: 1);
+
+            Assert.Equal(expectedSelectedText, model.SelectedText);
+
+            model.HandlePointerWheel(new Vector(0, 1));
+
+            Assert.True(model.HasSelection);
+            Assert.Equal(expectedSelectedText, model.SelectedText);
+            Assert.Empty(terminal.SelectionRectsForTests);
         });
     }
 
@@ -1227,6 +1308,20 @@ public sealed class TerminalControlTests : AvaloniaTestBase
         TerminalSamples.LoadScrollSample(model);
         Assert.True(model.CanScroll);
         Assert.True(model.ScrollOffset > 0);
+    }
+
+    private static TerminalControl GetScrollSampleTerminal(ScrollSampleControl sample, out TerminalControlModel model)
+    {
+        var grid = Assert.IsType<Grid>(sample.Content);
+        var terminal = Assert.IsType<TerminalControl>(grid.Children.OfType<TerminalControl>().Single());
+        model = Assert.IsType<TerminalControlModel>(terminal.Model);
+        return terminal;
+    }
+
+    private static string GetViewportRowText(TerminalControlModel model, int row)
+    {
+        var viewportRow = model.ViewportRows[row];
+        return string.Concat(viewportRow.Runs.Select(static run => run.Text)).TrimEnd();
     }
 
     private static void RestoreResource(Avalonia.Application application, string key, bool hadPrevious, object? previous)
