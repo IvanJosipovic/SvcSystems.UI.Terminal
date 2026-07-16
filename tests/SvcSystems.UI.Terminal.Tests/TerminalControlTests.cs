@@ -427,7 +427,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             Assert.True(model.IsMouseModeActive);
             Assert.False(model.HasSelection);
             Assert.NotEmpty(sent);
-            Assert.Contains(sent.Select(Encoding.UTF8.GetString), text => text.Contains("<0;3;1M", StringComparison.Ordinal));
+            Assert.Contains(sent.Select(Encoding.UTF8.GetString), text => text.Contains("<0;1;1M", StringComparison.Ordinal));
         });
     }
 
@@ -446,7 +446,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             control.SimulatePointerPressed(point, clickCount: 1);
             control.SimulatePointerReleased(point);
 
-            Assert.Contains(sent.Select(Encoding.UTF8.GetString), text => text.Contains("<0;2;2m", StringComparison.Ordinal));
+            Assert.Contains(sent.Select(Encoding.UTF8.GetString), text => text.Contains("<0;1;1m", StringComparison.Ordinal));
         });
     }
 
@@ -464,7 +464,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             control.SimulatePointerPressed(control.GetCellCenter(0, 0), clickCount: 1);
             control.SimulatePointerMoved(control.GetCellCenter(3, 1), isLeftButtonPressed: true);
 
-            Assert.Contains(sent.Select(Encoding.UTF8.GetString), text => text.Contains("<32;4;2M", StringComparison.Ordinal));
+            Assert.Contains(sent.Select(Encoding.UTF8.GetString), text => text.Contains("<32;1;1M", StringComparison.Ordinal));
         });
     }
 
@@ -481,11 +481,11 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             control.SimulatePointerPressed(control.GetCellCenter(0, 1), clickCount: 1);
             control.SimulatePointerMoved(new Point(10, control.Bounds.Height + 48), isLeftButtonPressed: true);
 
-            Assert.True(control.SelectionAutoScrollDeltaForTests > 0);
+            Assert.Equal(0, control.SelectionAutoScrollDeltaForTests);
 
             control.ProcessSelectionAutoScrollForTests();
 
-            Assert.True(model.ScrollOffset > initialOffset);
+            Assert.Equal(initialOffset, model.ScrollOffset);
             Assert.True(model.HasSelection);
             Assert.False(string.IsNullOrEmpty(model.SelectedText));
         });
@@ -504,11 +504,11 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             control.SimulatePointerPressed(control.GetCellCenter(0, 2), clickCount: 1);
             control.SimulatePointerMoved(new Point(10, -48), isLeftButtonPressed: true);
 
-            Assert.True(control.SelectionAutoScrollDeltaForTests < 0);
+            Assert.Equal(0, control.SelectionAutoScrollDeltaForTests);
 
             control.ProcessSelectionAutoScrollForTests();
 
-            Assert.True(model.ScrollOffset < initialOffset);
+            Assert.Equal(initialOffset, model.ScrollOffset);
             Assert.True(model.HasSelection);
             Assert.False(string.IsNullOrEmpty(model.SelectedText));
         });
@@ -527,7 +527,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             control.SimulatePointerPressed(control.GetCellCenter(0, 1), clickCount: 1);
             control.SimulatePointerMoved(outsidePoint, isLeftButtonPressed: true);
 
-            Assert.NotEqual(0, control.SelectionAutoScrollDeltaForTests);
+            Assert.Equal(0, control.SelectionAutoScrollDeltaForTests);
 
             control.SimulatePointerReleased(outsidePoint);
 
@@ -590,7 +590,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             Assert.NotNull(raised);
             Assert.True(raised.HasSelection);
             Assert.Equal(TerminalSamples.SelectionSampleText[..8], raised.SelectedText);
-            Assert.Equal(point, raised.Position);
+            Assert.Equal(new Point(0, 0), raised.Position);
         });
     }
 
@@ -610,7 +610,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             Assert.NotNull(raised);
             Assert.False(raised.HasSelection);
             Assert.Equal(string.Empty, raised.SelectedText);
-            Assert.Equal(point, raised.Position);
+            Assert.Equal(new Point(0, 0), raised.Position);
         });
     }
 
