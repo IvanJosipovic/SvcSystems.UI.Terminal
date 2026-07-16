@@ -24,7 +24,18 @@
         "patch",
         "digest"
       ],
-      "automerge": false,
+      "automerge": true,
+      "matchFileNames": [
+        "global.json"
+      ]
+    },
+    {
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
+      "automerge": true,
       "semanticCommitType": "fix",
       "matchFileNames": [
         "src/**"
@@ -38,10 +49,19 @@
       ],
       "automerge": true,
       "matchFileNames": [
-        "global.json",
+        ".github/workflows/**",
         "tests/**",
         "benchmarks/**"
       ]
+    },
+    {
+      "matchManagers": [
+        "nuget"
+      ],
+      "matchPackageNames": [
+        "PropertyGenerator.Avalonia"
+      ],
+      "semanticCommitType": "chore"
     }
   ]
 }
