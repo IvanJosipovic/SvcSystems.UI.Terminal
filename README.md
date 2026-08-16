@@ -269,26 +269,16 @@ The desktop sample includes those resources automatically. If you host the contr
 
 `Colors.axaml` provides:
 
-- the default `TerminalControl` font settings
 - the exported 256-color terminal palette as `SvcSystems.UI.TerminalColor0` through `SvcSystems.UI.TerminalColor255`
-- resource keys that the control reads for optional caret and selection overrides
 
 Available resource keys:
 
-- `SvcSystems.UI.TerminalFontFamily`
-- `SvcSystems.UI.TerminalFontSize`
-- `SvcSystems.UI.TerminalCaretBrush`
-- `SvcSystems.UI.TerminalSelectionBrush`
 - `SvcSystems.UI.TerminalColor0` ... `SvcSystems.UI.TerminalColor255`
 
 You can override those resources at the application level to align the terminal with your app theme:
 
 ```xml
 <Application.Resources>
-    <x:String x:Key="SvcSystems.UI.TerminalFontFamily">Fira Code</x:String>
-    <x:Double x:Key="SvcSystems.UI.TerminalFontSize">14</x:Double>
-    <SolidColorBrush x:Key="SvcSystems.UI.TerminalCaretBrush" Color="#FFB000" />
-    <SolidColorBrush x:Key="SvcSystems.UI.TerminalSelectionBrush" Color="#4060A0FF" />
     <SolidColorBrush x:Key="SvcSystems.UI.TerminalColor0" Color="#111111" />
     <SolidColorBrush x:Key="SvcSystems.UI.TerminalColor15" Color="#F5F5F5" />
 </Application.Resources>
@@ -313,7 +303,7 @@ Example:
 
 Notes:
 
-- font defaults come from `Colors.axaml` and can be overridden by application resources
+- font defaults are provided by the `TerminalControl` property registrations and can be overridden by styles or direct values
 - caret and selection use the control properties first, then the corresponding application resources, then the built-in fallback behavior
 - ANSI foreground/background rendering uses the exported `SvcSystems.UI.TerminalColor*` resource keys, so hosts can replace the palette without changing library code
 
