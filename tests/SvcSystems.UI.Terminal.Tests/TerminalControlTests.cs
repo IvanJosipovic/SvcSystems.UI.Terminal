@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Media;
 using Avalonia.Threading;
 using SvcSystems.UI.Terminal;
 using SvcSystems.UI.Terminal.Samples;
@@ -236,7 +237,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
         {
             var control = CreateControl(out _, out _);
 
-            control.FontFamily = "__missing_font_family__";
+            control.FontFamily = new FontFamily("__missing_font_family__");
 
             Assert.True(control.CanRenderTextForTests);
         });
@@ -277,7 +278,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
         {
             var control = CreateControl(out _, out _);
 
-            Assert.Equal("Cascadia Mono", control.FontFamily);
+            Assert.Equal("Cascadia Mono", control.FontFamily.Name);
             Assert.Equal(12, control.FontSize);
             Assert.Null(control.CaretBrush);
             Assert.Null(control.SelectionBrush);
@@ -285,34 +286,26 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     }
 
     [Fact]
-    public Task ApplicationResources_CanOverrideControlStyleDefaults()
+    public Task ApplicationResources_CanOverrideBrushFallbacks()
     {
         return RunInHeadlessSession(() =>
         {
             var application = Avalonia.Application.Current ?? throw new InvalidOperationException("No application is running.");
-            var hadFontFamily = application.Resources.TryGetValue("SvcSystems.UI.TerminalFontFamily", out var previousFontFamily);
-            var hadFontSize = application.Resources.TryGetValue("SvcSystems.UI.TerminalFontSize", out var previousFontSize);
             var hadCaretBrush = application.Resources.TryGetValue("SvcSystems.UI.TerminalCaretBrush", out var previousCaretBrush);
             var hadSelectionBrush = application.Resources.TryGetValue("SvcSystems.UI.TerminalSelectionBrush", out var previousSelectionBrush);
 
             try
             {
-                application.Resources["SvcSystems.UI.TerminalFontFamily"] = "Fira Code";
-                application.Resources["SvcSystems.UI.TerminalFontSize"] = 14d;
                 application.Resources["SvcSystems.UI.TerminalCaretBrush"] = Avalonia.Media.Brushes.Orange;
                 application.Resources["SvcSystems.UI.TerminalSelectionBrush"] = Avalonia.Media.Brushes.CadetBlue;
 
                 var control = CreateControl(out _, out _);
 
-                Assert.Equal("Fira Code", control.FontFamily);
-                Assert.Equal(14d, control.FontSize);
                 Assert.Same(Avalonia.Media.Brushes.Orange, control.CaretBrushForTests);
                 Assert.Same(Avalonia.Media.Brushes.CadetBlue, control.SelectionBrushForTests);
             }
             finally
             {
-                RestoreResource(application, "SvcSystems.UI.TerminalFontFamily", hadFontFamily, previousFontFamily);
-                RestoreResource(application, "SvcSystems.UI.TerminalFontSize", hadFontSize, previousFontSize);
                 RestoreResource(application, "SvcSystems.UI.TerminalCaretBrush", hadCaretBrush, previousCaretBrush);
                 RestoreResource(application, "SvcSystems.UI.TerminalSelectionBrush", hadSelectionBrush, previousSelectionBrush);
             }

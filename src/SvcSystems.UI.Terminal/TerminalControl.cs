@@ -98,7 +98,6 @@ public partial class TerminalControl : Grid
         };
         _selectionAutoScrollTimer.Tick += OnSelectionAutoScrollTimerTick;
 
-        ApplyResourceDefaults();
         CalculateTextSize();
         UpdateScrollBar();
     }
@@ -111,9 +110,9 @@ public partial class TerminalControl : Grid
         set => SetValue(ModelProperty, value);
     }
 
-    public static readonly StyledProperty<string> FontFamilyProperty = AvaloniaProperty.Register<TerminalControl, string>(nameof(FontFamily), "Cascadia Mono");
+    public static readonly StyledProperty<FontFamily> FontFamilyProperty = AvaloniaProperty.Register<TerminalControl, FontFamily>(nameof(FontFamily), new FontFamily("Cascadia Mono"));
 
-    public string FontFamily
+    public FontFamily FontFamily
     {
         get => GetValue(FontFamilyProperty);
         set => SetValue(FontFamilyProperty, value);
@@ -631,33 +630,6 @@ public partial class TerminalControl : Grid
 
         value = TryGetApplicationResource(resourceKey);
         return value != null;
-    }
-
-    private void ApplyResourceDefaults()
-    {
-        if (TryGetApplicationResource("SvcSystems.UI.TerminalFontFamily") is string fontFamily)
-        {
-            FontFamily = fontFamily;
-        }
-
-        if (TryGetApplicationResource("SvcSystems.UI.TerminalFontSize") is double fontSize)
-        {
-            FontSize = fontSize;
-        }
-        else if (TryGetApplicationResource("SvcSystems.UI.TerminalFontSize") is int fontSizeInt)
-        {
-            FontSize = fontSizeInt;
-        }
-
-        if (TryGetApplicationResource("SvcSystems.UI.TerminalCaretBrush") is IBrush caretBrush)
-        {
-            CaretBrush = caretBrush;
-        }
-
-        if (TryGetApplicationResource("SvcSystems.UI.TerminalSelectionBrush") is IBrush selectionBrush)
-        {
-            SelectionBrush = selectionBrush;
-        }
     }
 
     private static Brush[] CreateFallbackXtermPalette()

@@ -1,11 +1,8 @@
 <Styles
     xmlns="https://github.com/avaloniaui"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:SvcSystems.UI.Terminal">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Styles.Resources>
         <ResourceDictionary>
-            <x:String x:Key="SvcSystems.UI.TerminalFontFamily">Cascadia Mono</x:String>
-            <x:Double x:Key="SvcSystems.UI.TerminalFontSize">12</x:Double>
             <SolidColorBrush x:Key="SvcSystems.UI.TerminalColor0" Color="#000000" />
             <SolidColorBrush x:Key="SvcSystems.UI.TerminalColor1" Color="#800000" />
             <SolidColorBrush x:Key="SvcSystems.UI.TerminalColor2" Color="#008000" />
@@ -264,9 +261,4 @@
             <SolidColorBrush x:Key="SvcSystems.UI.TerminalColor255" Color="#EEEEEE" />
         </ResourceDictionary>
     </Styles.Resources>
-
-    <Style Selector="local|TerminalControl">
-        <Setter Property="FontFamily" Value="{DynamicResource SvcSystems.UI.TerminalFontFamily}" />
-        <Setter Property="FontSize" Value="{DynamicResource SvcSystems.UI.TerminalFontSize}" />
-    </Style>
 </Styles>
