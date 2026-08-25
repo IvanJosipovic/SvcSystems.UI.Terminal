@@ -272,6 +272,25 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task TerminalControl_Render_ResolvesDefaultColorsThroughSurface()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            model.Feed("A");
+
+            using var bitmap = new Avalonia.Media.Imaging.RenderTargetBitmap(new PixelSize(320, 120));
+            bitmap.Render(control);
+
+            var defaultForeground = Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(control.ResolveColorForTests(256));
+            var defaultBackground = Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(control.ResolveColorForTests(257));
+
+            Assert.Equal(Avalonia.Media.Colors.White, defaultForeground.Color);
+            Assert.Equal(Avalonia.Media.Colors.Black, defaultBackground.Color);
+        });
+    }
+
+    [Fact]
     public Task ResourceStyle_DefaultsAlignFontCaretAndSelection()
     {
         return RunInHeadlessSession(() =>
