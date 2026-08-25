@@ -1523,7 +1523,7 @@ public partial class TerminalControl : Grid
                         owner._consoleTextSize.Height * row.RowIndex,
                         owner._consoleTextSize.Width * run.CellWidth,
                         owner._consoleTextSize.Height + 1);
-                    context.FillRectangle(owner.ResolveColorBrush(run.BackgroundColor, isForeground: false), runRect);
+                    context.FillRectangle(owner.ResolveColorBrush(run.BackgroundColor), runRect);
 
                     if (owner._canRenderText)
                     {
@@ -1686,8 +1686,8 @@ public partial class TerminalControl : Grid
             (fg, bg) = (bg, fg);
         }
 
-        if (ResolveColorBrush(fg, isForeground: true) is not ISolidColorBrush foregroundBrush ||
-            ResolveColorBrush(bg, isForeground: false) is not ISolidColorBrush backgroundBrush)
+        if (ResolveColorBrush(fg) is not ISolidColorBrush foregroundBrush ||
+            ResolveColorBrush(bg) is not ISolidColorBrush backgroundBrush)
         {
             return false;
         }
@@ -1729,11 +1729,16 @@ public partial class TerminalControl : Grid
         return FallbackXtermPalette[xtermColor];
     }
 
-    private Brush ResolveColorBrush(int color, bool isForeground)
+    private Brush ResolveColorBrush(int color)
     {
-        if (color == 256 || color == 257)
+        if (color == 256)
         {
-            return ResolvePaletteBrush(isForeground ? 15 : 0);
+            return ResolvePaletteBrush(15);
+        }
+
+        if (color == 257)
+        {
+            return ResolvePaletteBrush(0);
         }
 
         if (color is >= 0 and <= 255)
@@ -1763,7 +1768,7 @@ public partial class TerminalControl : Grid
 
         EvictFormattedTextCacheEntriesIfNeeded();
 
-        var foregroundBrush = ResolveColorBrush(run.ForegroundColor, isForeground: true);
+        var foregroundBrush = ResolveColorBrush(run.ForegroundColor);
         var formattedText = new FormattedText(run.Text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, _typeface, FontSize, foregroundBrush);
         if (run.TextDecorations != null)
         {
@@ -1839,6 +1844,7 @@ public partial class TerminalControl : Grid
     internal int SelectionAutoScrollDeltaForTests => _selectionAutoScrollDelta;
     internal IBrush SelectionBrushForTests => ResolveSelectionBrush();
     internal IBrush ResolveXtermColorForTests(int xtermColor) => ResolvePaletteBrush(xtermColor);
+    internal IBrush ResolveColorForTests(int color) => ResolveColorBrush(color);
 }
 
 internal readonly record struct FormattedTextCacheKey(

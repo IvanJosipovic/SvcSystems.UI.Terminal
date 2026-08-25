@@ -256,6 +256,21 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task TerminalControl_DefaultColorSentinelsResolveByValue()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out _, out _);
+
+            var defaultForeground = Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(control.ResolveColorForTests(256));
+            var defaultBackground = Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(control.ResolveColorForTests(257));
+
+            Assert.Equal(Avalonia.Media.Colors.White, defaultForeground.Color);
+            Assert.Equal(Avalonia.Media.Colors.Black, defaultBackground.Color);
+        });
+    }
+
+    [Fact]
     public Task ResourceStyle_DefaultsAlignFontCaretAndSelection()
     {
         return RunInHeadlessSession(() =>
@@ -311,6 +326,20 @@ public sealed class TerminalControlTests : AvaloniaTestBase
         {
             var control = CreateControl(out var model, out _);
             model.Feed("\u001b[38;2;255;255;255;48;2;255;255;255mA\b");
+
+            var brush = Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(control.CaretBrushForTests);
+
+            Assert.Equal(Avalonia.Media.Colors.Black, brush.Color);
+        });
+    }
+
+    [Fact]
+    public Task CaretBrush_UsesInverseCellForegroundColor()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            model.Feed("\u001b[7mA\b");
 
             var brush = Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(control.CaretBrushForTests);
 
