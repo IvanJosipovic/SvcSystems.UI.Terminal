@@ -349,4 +349,5 @@ The repo has headless tests covering terminal behavior without needing a visible
 
 ```bash
 dotnet test --project tests/SvcSystems.UI.Terminal.Tests/SvcSystems.UI.Terminal.Tests.csproj -f net10.0
+dotnet test --project tests/SvcSystems.UI.Terminal.Tests/SvcSystems.UI.Terminal.Tests.csproj -f net11.0
 ```
