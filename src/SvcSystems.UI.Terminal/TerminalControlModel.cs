@@ -8,8 +8,10 @@ using XTerm.Selection;
 
 namespace SvcSystems.UI.Terminal;
 
-public partial class TerminalControlModel : AvaloniaObject
+public partial class TerminalControlModel : AvaloniaObject, IDisposable
 {
+    private bool _disposed;
+
     public TerminalControlModel(TerminalOptions? options = null)
     {
         // get the dimensions of terminal (cols and rows)
@@ -168,6 +170,34 @@ public partial class TerminalControlModel : AvaloniaObject
     private void SetTerminalTitle(string title)
     {
         Title = title;
+    }
+
+    /// <summary>
+    /// Releases the terminal this model created. Further calls are ignored.
+    /// </summary>
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// Releases the terminal this model created when <paramref name="disposing"/> is true.
+    /// </summary>
+    protected virtual void Dispose(bool disposing)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        if (disposing)
+        {
+            Terminal.TitleChanged -= OnTerminalTitleChanged;
+            Terminal.Selection.SelectionChanged -= HandleSelectionChanged;
+            Terminal.Dispose();
+        }
     }
 
     public void Send(string text)

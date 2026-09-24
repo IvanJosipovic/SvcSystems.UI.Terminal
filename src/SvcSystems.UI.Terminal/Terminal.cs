@@ -7,10 +7,11 @@ using EngineTerminalOptions = XTerm.Options.TerminalOptions;
 namespace SvcSystems.UI.Terminal;
 
 [SuppressMessage("Naming", "CA1724:Type names should not conflict with namespace names", Justification = "Public API keeps the Terminal type in the terminal namespace.")]
-public sealed class Terminal
+public sealed class Terminal : IDisposable
 {
     private readonly EngineTerminal _terminal;
     private readonly TerminalOptions _options;
+    private bool _disposed;
 
     public Terminal(TerminalOptions? options = null)
     {
@@ -98,6 +99,20 @@ public sealed class Terminal
         TitleChanged?.Invoke(this, new TitleChangedEventArgs(e.Title));
     }
 
+    /// <summary>
+    /// Releases the underlying XTerm.NET terminal. Further calls are ignored.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _terminal.TitleChanged -= OnTitleChanged;
+        _terminal.Dispose();
+    }
 }
 
 /// <summary>

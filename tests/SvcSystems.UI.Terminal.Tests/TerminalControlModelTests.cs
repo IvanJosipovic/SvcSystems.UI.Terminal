@@ -26,6 +26,23 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task Dispose_IgnoresLaterFeedsAndIsIdempotent()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+            model.Feed("a");
+
+            model.Dispose();
+            model.Feed("b");
+            model.Dispose();
+
+            Assert.Equal("a", GetCellText(model, 0, 0));
+            Assert.Equal(" ", GetCellText(model, 1, 0));
+        });
+    }
+
+    [Fact]
     public Task Send_ForwardsUtf8PayloadToSubscribers()
     {
         return RunInHeadlessSession(() =>
