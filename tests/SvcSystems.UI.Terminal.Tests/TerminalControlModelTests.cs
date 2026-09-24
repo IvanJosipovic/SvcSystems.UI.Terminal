@@ -43,6 +43,22 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task Send_AfterDispose_RaisesNoUserInput()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+            var raised = false;
+            model.UserInput += (_, _) => raised = true;
+
+            model.Dispose();
+            model.Send("abc");
+
+            Assert.False(raised);
+        });
+    }
+
+    [Fact]
     public Task Send_ForwardsUtf8PayloadToSubscribers()
     {
         return RunInHeadlessSession(() =>

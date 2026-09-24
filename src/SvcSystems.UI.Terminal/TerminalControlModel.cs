@@ -27,7 +27,7 @@ public partial class TerminalControlModel : AvaloniaObject, IDisposable
     }
 
     [GeneratedDirectProperty]
-    public partial Terminal Terminal { get; set; }
+    public partial Terminal Terminal { get; private set; }
 
     [GeneratedDirectProperty]
     public partial SearchService SearchService { get; set; }
@@ -207,12 +207,22 @@ public partial class TerminalControlModel : AvaloniaObject, IDisposable
 
     public void Send(byte[] data)
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         EnsureCaretIsVisible();
         UserInput?.Invoke(this, new TerminalUserInputEventArgs(data));
     }
 
     public void Resize(double width, double height, double textWidth, double textHeight)
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         if (width <= 0 || height <= 0 || textWidth <= 0 || textHeight <= 0)
         {
             return;
@@ -235,6 +245,11 @@ public partial class TerminalControlModel : AvaloniaObject, IDisposable
 
     public void UpdateDisplay()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         RebuildViewport();
 
         //UpdateCursorPosition();
@@ -249,6 +264,11 @@ public partial class TerminalControlModel : AvaloniaObject, IDisposable
 
     public void Feed(byte[] text, int length = -1)
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         SearchService?.Invalidate();
         var wasAtBottom = Terminal.Buffer.IsAtBottom;
         Terminal?.Feed(text, length);
