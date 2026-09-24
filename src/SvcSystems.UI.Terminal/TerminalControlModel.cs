@@ -8,8 +8,10 @@ using XTerm.Selection;
 
 namespace SvcSystems.UI.Terminal;
 
-public partial class TerminalControlModel : AvaloniaObject
+public partial class TerminalControlModel : AvaloniaObject, IDisposable
 {
+    private bool _disposed;
+
     public TerminalControlModel(TerminalOptions? options = null)
     {
         // get the dimensions of terminal (cols and rows)
@@ -25,7 +27,7 @@ public partial class TerminalControlModel : AvaloniaObject
     }
 
     [GeneratedDirectProperty]
-    public partial Terminal Terminal { get; set; }
+    public partial Terminal Terminal { get; private set; }
 
     [GeneratedDirectProperty]
     public partial SearchService SearchService { get; set; }
@@ -170,6 +172,34 @@ public partial class TerminalControlModel : AvaloniaObject
         Title = title;
     }
 
+    /// <summary>
+    /// Releases the terminal this model created. Further calls are ignored.
+    /// </summary>
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// Releases the terminal this model created when <paramref name="disposing"/> is true.
+    /// </summary>
+    protected virtual void Dispose(bool disposing)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        if (disposing)
+        {
+            Terminal.TitleChanged -= OnTerminalTitleChanged;
+            Terminal.Selection.SelectionChanged -= HandleSelectionChanged;
+            Terminal.Dispose();
+        }
+    }
+
     public void Send(string text)
     {
         Send(Encoding.UTF8.GetBytes(text));
@@ -177,12 +207,22 @@ public partial class TerminalControlModel : AvaloniaObject
 
     public void Send(byte[] data)
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         EnsureCaretIsVisible();
         UserInput?.Invoke(this, new TerminalUserInputEventArgs(data));
     }
 
     public void Resize(double width, double height, double textWidth, double textHeight)
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         if (width <= 0 || height <= 0 || textWidth <= 0 || textHeight <= 0)
         {
             return;
@@ -205,6 +245,11 @@ public partial class TerminalControlModel : AvaloniaObject
 
     public void UpdateDisplay()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         RebuildViewport();
 
         //UpdateCursorPosition();
@@ -219,6 +264,11 @@ public partial class TerminalControlModel : AvaloniaObject
 
     public void Feed(byte[] text, int length = -1)
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         SearchService?.Invalidate();
         var wasAtBottom = Terminal.Buffer.IsAtBottom;
         Terminal?.Feed(text, length);

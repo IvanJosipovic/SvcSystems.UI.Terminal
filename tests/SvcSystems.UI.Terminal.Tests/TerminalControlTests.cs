@@ -1208,7 +1208,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             var payloads = sent.Select(Encoding.UTF8.GetString).ToArray();
 
             Assert.Contains("\u001bOA", payloads);
-            Assert.Contains("\u001b[H", payloads);
+            Assert.Contains("\u001bOH", payloads);
         });
     }
 
