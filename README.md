@@ -17,6 +17,7 @@ Terminal Control for Avalonia built on top of [XTerm.NET](https://github.com/tom
 - Bindable selection state via `SelectedText` and `HasSelection`
 - Search helpers for finding and navigating matches in the terminal buffer
 - Mouse reporting mode support for xterm-compatible terminal apps
+- Kitty keyboard protocol key encoding for terminal apps that switch it on
 - Host-friendly context menu and clipboard hooks
 - Configurable right-click behavior via `RightClickAction`
 - Model-driven API for feeding terminal output and sending user input
@@ -182,6 +183,7 @@ _ = Task.Run(async () =>
 - `TabStopWidth`
 - `TermName`
 - `ReflowOnResize`
+- `KittyKeyboardEnabled`
 
 ## Selection And Context Menus
 
@@ -252,6 +254,26 @@ Useful model properties:
 When the terminal application enables mouse reporting, `TerminalControl` forwards pointer press, release, and motion events to `XTerm.NET` instead of using them for text selection. This allows interactive terminal applications to receive mouse input.
 
 This is controlled by the terminal app, not by the Avalonia host. If an app does not switch the terminal into xterm mouse mode, the control will keep using the pointer for normal text selection.
+
+## Keyboard Protocol
+
+`XTerm.NET` answers the [kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/) query, and `TerminalControl` encodes keys with it once the terminal application sets its flags. That is what lets an application tell `Shift+Enter` from `Enter`, or `Escape` from the start of an escape sequence. Until an application sets flags, and again after it pops them, keys keep their legacy xterm encodings.
+
+Under the protocol:
+
+- key presses, repeats, and releases are reported as the application's flags ask
+- a key that only types text still arrives through text input, so composed and dead-key characters keep working
+- `PageUp` and `PageDown` keep scrolling the viewport unless the application has taken the cursor keys
+- keys held with the Meta (Windows or Command) key are left to the host
+
+Hosts that want applications to stay on the legacy encodings can switch the protocol off:
+
+```csharp
+var model = new TerminalControlModel(new TerminalOptions
+{
+    KittyKeyboardEnabled = false,
+});
+```
 
 ## Styling
 

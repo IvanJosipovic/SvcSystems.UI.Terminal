@@ -27,6 +27,7 @@ public sealed class Terminal : IDisposable
             TabStopWidth = Math.Max(options.TabStopWidth, 1),
             ConvertEol = options.ConvertEol,
             TermName = options.TermName,
+            KittyKeyboardEnabled = options.KittyKeyboardEnabled,
         };
 
         _terminal = new EngineTerminal(engineOptions);
@@ -53,6 +54,7 @@ public sealed class Terminal : IDisposable
         TermName = _options.TermName,
         ConvertEol = _options.ConvertEol,
         ReflowOnResize = _options.ReflowOnResize,
+        KittyKeyboardEnabled = _options.KittyKeyboardEnabled,
     };
 
     public int Cols => _terminal.Cols;
