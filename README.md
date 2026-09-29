@@ -262,6 +262,7 @@ This is controlled by the terminal app, not by the Avalonia host. If an app does
 Under the protocol:
 
 - key presses, repeats, and releases are reported as the application's flags ask
+- a release is reported only for a key that went down under the protocol, and a key still down when the control loses focus is reported as released
 - a key that only types text still arrives through text input, so composed and dead-key characters keep working
 - `PageUp` and `PageDown` keep scrolling the viewport unless the application has taken the cursor keys
 - keys held with the Meta (Windows or Command) key are left to the host

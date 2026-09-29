@@ -174,7 +174,56 @@ public sealed class TerminalControlKittyKeyboardTests : AvaloniaTestBase
     }
 
     [Fact]
-    public Task LosingFocus_ForgetsTheKeysThatWereDown()
+    public Task KeyRelease_WithoutAPressUnderTheProtocol_IsNotReported()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out var sent);
+
+            control.SimulateKeyDown(Key.Escape, physicalKey: PhysicalKey.Escape);
+            model.Feed(DisambiguateAndEventTypes);
+            var released = control.SimulateKeyUp(Key.Escape, physicalKey: PhysicalKey.Escape);
+
+            Assert.Equal(["\u001b"], sent);
+            Assert.False(released.Handled);
+        });
+    }
+
+    [Fact]
+    public Task KeyRelease_OfAReportedKey_IsReportedWithMetaHeld()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out var sent);
+            model.Feed(DisambiguateAndEventTypes);
+
+            control.SimulateKeyDown(Key.C, KeyModifiers.Control, "c", PhysicalKey.C);
+            control.SimulateKeyUp(Key.C, KeyModifiers.Control | KeyModifiers.Meta, "c", PhysicalKey.C);
+
+            Assert.Equal(["\u001b[99;5u", "\u001b[99;13:3u"], sent);
+        });
+    }
+
+    [Fact]
+    public Task KeyReleasedWhileTheProtocolWasOff_IsPressedAgainNotRepeated()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out var sent);
+            model.Feed(DisambiguateAndEventTypes);
+
+            control.SimulateKeyDown(Key.Escape, physicalKey: PhysicalKey.Escape);
+            model.Feed(PopFlags);
+            control.SimulateKeyUp(Key.Escape, physicalKey: PhysicalKey.Escape);
+            model.Feed(DisambiguateAndEventTypes);
+            control.SimulateKeyDown(Key.Escape, physicalKey: PhysicalKey.Escape);
+
+            Assert.Equal(["\u001b[27u", "\u001b[27u"], sent);
+        });
+    }
+
+    [Fact]
+    public Task LosingFocus_ReleasesTheKeysThatWereDown()
     {
         return RunInHeadlessSession(() =>
         {
@@ -185,7 +234,22 @@ public sealed class TerminalControlKittyKeyboardTests : AvaloniaTestBase
             control.SimulateLostFocus();
             control.SimulateKeyDown(Key.Escape, physicalKey: PhysicalKey.Escape);
 
-            Assert.Equal(["\u001b[27u", "\u001b[27u"], sent);
+            Assert.Equal(["\u001b[27u", "\u001b[27;1:3u", "\u001b[27u"], sent);
+        });
+    }
+
+    [Fact]
+    public Task LosingFocus_SendsNothingWithoutEventTypes()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out var sent);
+            model.Feed(Disambiguate);
+
+            control.SimulateKeyDown(Key.Escape, physicalKey: PhysicalKey.Escape);
+            control.SimulateLostFocus();
+
+            Assert.Equal(["\u001b[27u"], sent);
         });
     }
 

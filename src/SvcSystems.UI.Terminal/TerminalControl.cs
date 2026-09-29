@@ -11,6 +11,7 @@ using Avalonia.Threading;
 using XTerm.Buffer;
 using Point = Avalonia.Point;
 using AvaloniaModifiers = Avalonia.Input.KeyModifiers;
+using EngineKeyEvent = XTerm.Options.KeyEvent;
 using KittyKeyboardEventType = XTerm.Input.KittyKeyboardEventType;
 using XKey = XTerm.Input.Key;
 using XMouseButton = XTerm.Input.MouseButton;
@@ -579,7 +580,7 @@ public partial class TerminalControl : Grid
     {
         base.OnLostFocus(e);
         _hasFocus = false;
-        _pressedKeys.Clear();
+        ReleasePressedKeys();
         _surface.InvalidateVisual();
     }
 
@@ -1312,7 +1313,7 @@ public partial class TerminalControl : Grid
         var keyId = PressedKeyId.From(e);
         var engine = Model.Terminal.Engine;
 
-        if (!engine.KittyKeyboardActive || e.KeyModifiers.HasFlag(AvaloniaModifiers.Meta) || ScrollsViewport(e))
+        if (!engine.KittyKeyboardActive)
         {
             _pressedKeys.Remove(keyId);
             return false;
@@ -1323,17 +1324,25 @@ public partial class TerminalControl : Grid
 
         if (isRelease)
         {
-            // A release often carries no symbol, so it reports the key as it was pressed.
-            if (_pressedKeys.Remove(keyId, out var pressed))
+            // Only a key that went down under the protocol is released under it. The release
+            // often carries no symbol, so it reports the key as it was pressed.
+            if (!_pressedKeys.Remove(keyId, out var pressed))
             {
-                keyEvent.Key = pressed.Key;
-                keyEvent.Code = pressed.Code;
+                return false;
             }
 
+            keyEvent.Key = pressed.Key;
+            keyEvent.Code = pressed.Code;
             eventType = KittyKeyboardEventType.Release;
         }
         else
         {
+            if (e.KeyModifiers.HasFlag(AvaloniaModifiers.Meta) || ScrollsViewport(e))
+            {
+                _pressedKeys.Remove(keyId);
+                return false;
+            }
+
             eventType = _pressedKeys.ContainsKey(keyId) ? KittyKeyboardEventType.Repeat : KittyKeyboardEventType.Press;
             _pressedKeys[keyId] = new PressedKey(keyEvent.Key, keyEvent.Code);
         }
@@ -1346,6 +1355,34 @@ public partial class TerminalControl : Grid
 
         Model.Send(sequence);
         return true;
+    }
+
+    // The key-up of a key held when the focus moves goes to whatever took the focus, so the
+    // keys still down are released here or the application never sees them go up.
+    private void ReleasePressedKeys()
+    {
+        if (_pressedKeys.Count == 0)
+        {
+            return;
+        }
+
+        PressedKey[] pressedKeys = [.. _pressedKeys.Values];
+        _pressedKeys.Clear();
+
+        if (Model is not { } model || !model.Terminal.Engine.KittyKeyboardActive)
+        {
+            return;
+        }
+
+        foreach (var pressed in pressedKeys)
+        {
+            var keyEvent = new EngineKeyEvent { Key = pressed.Key, Code = pressed.Code };
+            var sequence = model.Terminal.Engine.GenerateKittyKeyInput(keyEvent, KittyKeyboardEventType.Release);
+            if (!string.IsNullOrEmpty(sequence))
+            {
+                model.Send(sequence);
+            }
+        }
     }
 
     private bool ScrollsViewport(KeyEventArgs e)
