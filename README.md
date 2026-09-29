@@ -259,15 +259,28 @@ The library defines its default terminal styling in:
 
 - [`src/SvcSystems.UI.Terminal/Styles/Colors.axaml`](src/SvcSystems.UI.Terminal/Styles/Colors.axaml)
 
-The desktop sample includes those resources automatically. If you host the control yourself, include the style resource in your application:
+The desktop sample includes those resources automatically. If you host the control yourself, add the theme to your application's styles:
 
-```xml
-<Application.Styles>
-    <StyleInclude Source="avares://SvcSystems.UI.Terminal/Styles/Colors.axaml" />
-</Application.Styles>
+```csharp
+using SvcSystems.UI.Terminal;
+
+Styles.Add(new TerminalTheme());
 ```
 
-`Colors.axaml` provides:
+In XAML, declare the terminal namespace and add `TerminalTheme` to the application's styles:
+
+```xml
+<Application
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:terminal="using:SvcSystems.UI.Terminal">
+    <Application.Styles>
+        <terminal:TerminalTheme />
+    </Application.Styles>
+</Application>
+```
+
+`TerminalTheme` provides:
 
 - the exported 256-color terminal palette as `SvcSystems.UI.TerminalColor0` through `SvcSystems.UI.TerminalColor255`
 
