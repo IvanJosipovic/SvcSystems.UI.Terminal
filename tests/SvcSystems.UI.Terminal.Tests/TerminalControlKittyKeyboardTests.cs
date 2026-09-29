@@ -269,6 +269,21 @@ public sealed class TerminalControlKittyKeyboardTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task KeyEvents_WithoutAModel_AreIgnored()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = new TestableTerminalControl();
+
+            var pressed = control.SimulateKeyDown(Key.Escape, physicalKey: PhysicalKey.Escape);
+            var released = control.SimulateKeyUp(Key.Escape, physicalKey: PhysicalKey.Escape);
+
+            Assert.False(pressed.Handled);
+            Assert.False(released.Handled);
+        });
+    }
+
+    [Fact]
     public Task KeyPress_WithMeta_IsLeftToTheHost()
     {
         return RunInHeadlessSession(() =>
@@ -332,6 +347,27 @@ public sealed class TerminalControlKittyKeyboardTests : AvaloniaTestBase
         yield return [Disambiguate, Key.NumPad1, KeyModifiers.None, "1", PhysicalKey.None, "\u001b[57400u"];
         yield return [Disambiguate, Key.Add, KeyModifiers.None, "+", PhysicalKey.NumPadAdd, "\u001b[57413u"];
 
+        yield return [Disambiguate, Key.Down, KeyModifiers.None, string.Empty, PhysicalKey.ArrowDown, "\u001b[B"];
+        yield return [Disambiguate, Key.Right, KeyModifiers.None, string.Empty, PhysicalKey.ArrowRight, "\u001b[C"];
+        yield return [Disambiguate, Key.Left, KeyModifiers.None, string.Empty, PhysicalKey.ArrowLeft, "\u001b[D"];
+        yield return [Disambiguate, Key.End, KeyModifiers.None, string.Empty, PhysicalKey.End, "\u001b[F"];
+        yield return [Disambiguate, Key.Insert, KeyModifiers.None, string.Empty, PhysicalKey.Insert, "\u001b[2~"];
+        yield return [Disambiguate, Key.PageUp, KeyModifiers.Control, string.Empty, PhysicalKey.PageUp, "\u001b[5;5~"];
+        yield return [Disambiguate, Key.PageDown, KeyModifiers.Control, string.Empty, PhysicalKey.PageDown, "\u001b[6;5~"];
+        yield return [Disambiguate, Key.D1, KeyModifiers.Control, "1", PhysicalKey.Digit1, "\u001b[49;5u"];
+        yield return [Disambiguate, Key.D1, KeyModifiers.Control | KeyModifiers.Shift, "!", PhysicalKey.None, "\u001b[49;6u"];
+
+        yield return [Disambiguate, Key.Decimal, KeyModifiers.None, ".", PhysicalKey.NumPadDecimal, "\u001b[57409u"];
+        yield return [Disambiguate, Key.Divide, KeyModifiers.None, "/", PhysicalKey.NumPadDivide, "\u001b[57410u"];
+        yield return [Disambiguate, Key.Multiply, KeyModifiers.None, "*", PhysicalKey.NumPadMultiply, "\u001b[57411u"];
+        yield return [Disambiguate, Key.Subtract, KeyModifiers.None, "-", PhysicalKey.NumPadSubtract, "\u001b[57412u"];
+        yield return [Disambiguate, Key.OemPlus, KeyModifiers.None, "=", PhysicalKey.NumPadEqual, "\u001b[57415u"];
+        yield return [Disambiguate, Key.Decimal, KeyModifiers.None, ".", PhysicalKey.None, "\u001b[57409u"];
+        yield return [Disambiguate, Key.Divide, KeyModifiers.None, "/", PhysicalKey.None, "\u001b[57410u"];
+        yield return [Disambiguate, Key.Multiply, KeyModifiers.None, "*", PhysicalKey.None, "\u001b[57411u"];
+        yield return [Disambiguate, Key.Subtract, KeyModifiers.None, "-", PhysicalKey.None, "\u001b[57412u"];
+        yield return [Disambiguate, Key.Add, KeyModifiers.None, "+", PhysicalKey.None, "\u001b[57413u"];
+
         yield return [DisambiguateAndAlternateKeys, Key.A, KeyModifiers.Alt | KeyModifiers.Shift, "A", PhysicalKey.A, "\u001b[97:65;4u"];
 
         yield return [AllKeysAsEscapeCodes, Key.A, KeyModifiers.None, "a", PhysicalKey.A, "\u001b[97u"];
@@ -343,6 +379,23 @@ public sealed class TerminalControlKittyKeyboardTests : AvaloniaTestBase
         yield return [AllKeysAsEscapeCodes, Key.RightCtrl, KeyModifiers.Control, string.Empty, PhysicalKey.ControlRight, "\u001b[57448;5u"];
         yield return [AllKeysAsEscapeCodes, Key.LeftAlt, KeyModifiers.Alt, string.Empty, PhysicalKey.None, "\u001b[57443;3u"];
         yield return [AllKeysAsEscapeCodes, Key.CapsLock, KeyModifiers.None, string.Empty, PhysicalKey.CapsLock, "\u001b[57358u"];
+        yield return [AllKeysAsEscapeCodes, Key.Scroll, KeyModifiers.None, string.Empty, PhysicalKey.ScrollLock, "\u001b[57359u"];
+        yield return [AllKeysAsEscapeCodes, Key.NumLock, KeyModifiers.None, string.Empty, PhysicalKey.NumLock, "\u001b[57360u"];
+
+        yield return [AllKeysAsEscapeCodes, Key.RightShift, KeyModifiers.Shift, string.Empty, PhysicalKey.ShiftRight, "\u001b[57447;2u"];
+        yield return [AllKeysAsEscapeCodes, Key.LeftCtrl, KeyModifiers.Control, string.Empty, PhysicalKey.ControlLeft, "\u001b[57442;5u"];
+        yield return [AllKeysAsEscapeCodes, Key.LeftAlt, KeyModifiers.Alt, string.Empty, PhysicalKey.AltLeft, "\u001b[57443;3u"];
+        yield return [AllKeysAsEscapeCodes, Key.RightAlt, KeyModifiers.Alt, string.Empty, PhysicalKey.AltRight, "\u001b[57449;3u"];
+        yield return [AllKeysAsEscapeCodes, Key.LWin, KeyModifiers.None, string.Empty, PhysicalKey.MetaLeft, "\u001b[57444u"];
+        yield return [AllKeysAsEscapeCodes, Key.RWin, KeyModifiers.None, string.Empty, PhysicalKey.MetaRight, "\u001b[57450u"];
+
+        yield return [AllKeysAsEscapeCodes, Key.LeftShift, KeyModifiers.Shift, string.Empty, PhysicalKey.None, "\u001b[57441;2u"];
+        yield return [AllKeysAsEscapeCodes, Key.RightShift, KeyModifiers.Shift, string.Empty, PhysicalKey.None, "\u001b[57447;2u"];
+        yield return [AllKeysAsEscapeCodes, Key.LeftCtrl, KeyModifiers.Control, string.Empty, PhysicalKey.None, "\u001b[57442;5u"];
+        yield return [AllKeysAsEscapeCodes, Key.RightCtrl, KeyModifiers.Control, string.Empty, PhysicalKey.None, "\u001b[57448;5u"];
+        yield return [AllKeysAsEscapeCodes, Key.RightAlt, KeyModifiers.Alt, string.Empty, PhysicalKey.None, "\u001b[57449;3u"];
+        yield return [AllKeysAsEscapeCodes, Key.LWin, KeyModifiers.None, string.Empty, PhysicalKey.None, "\u001b[57444u"];
+        yield return [AllKeysAsEscapeCodes, Key.RWin, KeyModifiers.None, string.Empty, PhysicalKey.None, "\u001b[57450u"];
 
         yield return [AllKeysWithAssociatedText, Key.A, KeyModifiers.None, "a", PhysicalKey.A, "\u001b[97;;97u"];
         yield return [AllKeysWithAssociatedText, Key.A, KeyModifiers.Shift, "A", PhysicalKey.A, "\u001b[97;2;65u"];
