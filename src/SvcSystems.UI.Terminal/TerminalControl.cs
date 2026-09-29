@@ -3,17 +3,15 @@ using Avalonia.Controls;
 using Avalonia.Input.Platform;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
-using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
-using Avalonia.Styling;
 using System.Globalization;
-using System.Threading.Tasks;
 using Avalonia.Threading;
 using XTerm.Buffer;
 using Point = Avalonia.Point;
 using AvaloniaModifiers = Avalonia.Input.KeyModifiers;
+using KittyKeyboardEventType = XTerm.Input.KittyKeyboardEventType;
 using XKey = XTerm.Input.Key;
 using XMouseButton = XTerm.Input.MouseButton;
 using XMouseEventType = XTerm.Input.MouseEventType;
@@ -65,6 +63,7 @@ public partial class TerminalControl : Grid
     private readonly DispatcherTimer _selectionAutoScrollTimer;
     private readonly Dictionary<FormattedTextCacheKey, FormattedText> _formattedTextCache = [];
     private readonly Queue<FormattedTextCacheKey> _formattedTextCacheOrder = [];
+    private readonly Dictionary<PressedKeyId, PressedKey> _pressedKeys = [];
 
     public TerminalControl()
     {
@@ -272,6 +271,7 @@ public partial class TerminalControl : Grid
                 newModel.UpdateUI = RefreshFromModel;
             }
 
+            _pressedKeys.Clear();
             SyncSelectionStateFromModel();
             UpdateScrollBar();
             ResizeModelToViewport();
@@ -298,6 +298,13 @@ public partial class TerminalControl : Grid
         }
 
         Model.ClearSelection();
+
+        if (TrySendKittyKey(e, isRelease: false))
+        {
+            e.Handled = true;
+            return;
+        }
+
         bool handled = false;
 
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
@@ -391,6 +398,17 @@ public partial class TerminalControl : Grid
         }
 
         if (handled)
+        {
+            e.Handled = true;
+        }
+    }
+
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+        base.OnKeyUp(e);
+
+        if (TrySendKittyKey(e, isRelease: true))
         {
             e.Handled = true;
         }
@@ -561,6 +579,7 @@ public partial class TerminalControl : Grid
     {
         base.OnLostFocus(e);
         _hasFocus = false;
+        _pressedKeys.Clear();
         _surface.InvalidateVisual();
     }
 
@@ -1281,6 +1300,74 @@ public partial class TerminalControl : Grid
         Model.Send(sequence);
     }
 
+    // Encodes a key under the kitty keyboard protocol while the application has it switched on.
+    // A false return leaves the key to the legacy path, or to text input when it only types.
+    private bool TrySendKittyKey(KeyEventArgs e, bool isRelease)
+    {
+        if (Model == null)
+        {
+            return false;
+        }
+
+        var keyId = PressedKeyId.From(e);
+        var engine = Model.Terminal.Engine;
+
+        if (!engine.KittyKeyboardActive || e.KeyModifiers.HasFlag(AvaloniaModifiers.Meta) || ScrollsViewport(e))
+        {
+            _pressedKeys.Remove(keyId);
+            return false;
+        }
+
+        var keyEvent = KeyEventTranslator.Translate(e, Model.OptionAsMetaKey);
+        KittyKeyboardEventType eventType;
+
+        if (isRelease)
+        {
+            // A release often carries no symbol, so it reports the key as it was pressed.
+            if (_pressedKeys.Remove(keyId, out var pressed))
+            {
+                keyEvent.Key = pressed.Key;
+                keyEvent.Code = pressed.Code;
+            }
+
+            eventType = KittyKeyboardEventType.Release;
+        }
+        else
+        {
+            eventType = _pressedKeys.ContainsKey(keyId) ? KittyKeyboardEventType.Repeat : KittyKeyboardEventType.Press;
+            _pressedKeys[keyId] = new PressedKey(keyEvent.Key, keyEvent.Code);
+        }
+
+        var sequence = engine.GenerateKittyKeyInput(keyEvent, eventType);
+        if (string.IsNullOrEmpty(sequence) || IsLeftToTextInput(e, sequence))
+        {
+            return false;
+        }
+
+        Model.Send(sequence);
+        return true;
+    }
+
+    private bool ScrollsViewport(KeyEventArgs e)
+    {
+        const AvaloniaModifiers sentToTheApplication = AvaloniaModifiers.Control | AvaloniaModifiers.Alt;
+
+        return e.Key is Key.PageUp or Key.PageDown
+            && (e.KeyModifiers & sentToTheApplication) == AvaloniaModifiers.None
+            && Model?.Terminal.Engine.ApplicationCursorKeys == false;
+    }
+
+    // Text reaches the application through text input, which is also how composed and
+    // dead-key characters arrive, so a key that only types is not sent from here as well.
+    private static bool IsLeftToTextInput(KeyEventArgs e, string sequence)
+    {
+        const AvaloniaModifiers sentFromKeyDown = AvaloniaModifiers.Control | AvaloniaModifiers.Alt;
+
+        return (e.KeyModifiers & sentFromKeyDown) == AvaloniaModifiers.None
+            && sequence.Length == 1
+            && !char.IsControl(sequence[0]);
+    }
+
     private bool TrySendGeneratedKey(Key key, AvaloniaModifiers modifiers)
     {
         if (Model == null || !TryMapKey(key, out var mappedKey, out var extraModifiers))
@@ -1825,6 +1912,20 @@ internal readonly record struct FormattedTextCacheKey(
     FontWeight FontWeight,
     FontStyle FontStyle,
     TextDecorationFlags TextDecorations);
+
+internal readonly record struct PressedKeyId(PhysicalKey PhysicalKey, Key Key)
+{
+    public static PressedKeyId From(KeyEventArgs e)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+
+        return e.PhysicalKey == PhysicalKey.None
+            ? new PressedKeyId(PhysicalKey.None, e.Key)
+            : new PressedKeyId(e.PhysicalKey, Key.None);
+    }
+}
+
+internal readonly record struct PressedKey(string Key, string Code);
 
 [Flags]
 internal enum TextDecorationFlags
