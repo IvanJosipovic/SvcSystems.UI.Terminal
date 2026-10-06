@@ -66,6 +66,10 @@ public partial class TerminalControl : Grid
     private readonly Queue<FormattedTextCacheKey> _formattedTextCacheOrder = [];
     private readonly Dictionary<PressedKeyId, PressedKey> _pressedKeys = [];
 
+    // Some backends raise TextInput even for a handled KeyDown, so the text of the last key
+    // already sent is held until the next key to keep it from being sent twice.
+    private string? _textOfSentKey;
+
     public TerminalControl()
     {
         Focusable = true;
@@ -273,6 +277,7 @@ public partial class TerminalControl : Grid
             }
 
             _pressedKeys.Clear();
+            _textOfSentKey = null;
             SyncSelectionStateFromModel();
             UpdateScrollBar();
             ResizeModelToViewport();
@@ -292,6 +297,7 @@ public partial class TerminalControl : Grid
     {
         ArgumentNullException.ThrowIfNull(e);
         base.OnKeyDown(e);
+        _textOfSentKey = null;
 
         if (Model == null)
         {
@@ -302,7 +308,14 @@ public partial class TerminalControl : Grid
 
         if (TrySendKittyKey(e, isRelease: false))
         {
-            e.Handled = true;
+            MarkKeySent(e);
+            return;
+        }
+
+        // The protocol leaves Meta to the host, and the legacy encoder would drop it and send
+        // the bare key.
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Meta) && Model.Terminal.Engine.KittyKeyboardActive)
+        {
             return;
         }
 
@@ -400,8 +413,14 @@ public partial class TerminalControl : Grid
 
         if (handled)
         {
-            e.Handled = true;
+            MarkKeySent(e);
         }
+    }
+
+    private void MarkKeySent(KeyEventArgs e)
+    {
+        e.Handled = true;
+        _textOfSentKey = e.KeySymbol;
     }
 
     protected override void OnKeyUp(KeyEventArgs e)
@@ -422,6 +441,14 @@ public partial class TerminalControl : Grid
 
         if (Model == null || string.IsNullOrEmpty(e.Text))
         {
+            return;
+        }
+
+        // Text that differs from the key, such as a composed or IME character, still goes through.
+        if (string.Equals(e.Text, _textOfSentKey, StringComparison.Ordinal))
+        {
+            _textOfSentKey = null;
+            e.Handled = true;
             return;
         }
 
@@ -580,6 +607,7 @@ public partial class TerminalControl : Grid
     {
         base.OnLostFocus(e);
         _hasFocus = false;
+        _textOfSentKey = null;
         ReleasePressedKeys();
         _surface.InvalidateVisual();
     }

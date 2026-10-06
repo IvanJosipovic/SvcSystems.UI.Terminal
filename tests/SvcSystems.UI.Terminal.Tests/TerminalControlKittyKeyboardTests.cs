@@ -347,18 +347,97 @@ public sealed class TerminalControlKittyKeyboardTests : AvaloniaTestBase
         });
     }
 
+    [Theory]
+    [InlineData(Disambiguate, Key.C, "c", PhysicalKey.C)]
+    [InlineData(AllKeysAsEscapeCodes, Key.C, "c", PhysicalKey.C)]
+    [InlineData(Disambiguate, Key.Up, "", PhysicalKey.ArrowUp)]
+    [InlineData(Disambiguate, Key.Escape, "", PhysicalKey.Escape)]
+    [InlineData(Disambiguate, Key.Enter, "\r", PhysicalKey.Enter)]
+    [InlineData(Disambiguate, Key.Space, " ", PhysicalKey.Space)]
+    public Task KeyPress_WithMeta_IsLeftToTheHost(string flags, Key key, string keySymbol, PhysicalKey physicalKey)
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out var sent);
+            model.Feed(flags);
+
+            var args = control.SimulateKeyDown(key, KeyModifiers.Meta, keySymbol, physicalKey);
+
+            Assert.Empty(sent);
+            Assert.False(args.Handled);
+        });
+    }
+
+    [Theory]
+    [InlineData(AllKeysAsEscapeCodes, Key.A, KeyModifiers.None, "a", PhysicalKey.A, "\u001b[97u")]
+    [InlineData(AllKeysAsEscapeCodes, Key.D1, KeyModifiers.Shift, "!", PhysicalKey.Digit1, "\u001b[49;2u")]
+    [InlineData(Disambiguate, Key.A, KeyModifiers.Alt, "å", PhysicalKey.A, "\u001b[97;3u")]
+    [InlineData(Disambiguate, Key.Space, KeyModifiers.None, " ", PhysicalKey.Space, " ")]
+    public Task TextInput_OfAKeyAlreadySent_IsNotSentAgain(
+        string flags,
+        Key key,
+        KeyModifiers modifiers,
+        string keySymbol,
+        PhysicalKey physicalKey,
+        string expected)
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out var sent);
+            model.Feed(flags);
+
+            control.SimulateKeyDown(key, modifiers, keySymbol, physicalKey);
+            var text = control.SimulateTextInput(keySymbol);
+
+            Assert.Equal([expected], sent);
+            Assert.True(text.Handled);
+        });
+    }
+
     [Fact]
-    public Task KeyPress_WithMeta_IsLeftToTheHost()
+    public Task TextInput_ThatDiffersFromTheKeySent_IsStillSent()
     {
         return RunInHeadlessSession(() =>
         {
             var control = CreateControl(out var model, out var sent);
             model.Feed(AllKeysAsEscapeCodes);
 
-            var args = control.SimulateKeyDown(Key.C, KeyModifiers.Meta, "c", PhysicalKey.C);
+            control.SimulateKeyDown(Key.E, KeyModifiers.None, "e", PhysicalKey.E);
+            control.SimulateTextInput("é");
 
-            Assert.Empty(sent);
-            Assert.False(args.Handled);
+            Assert.Equal(["\u001b[101u", "é"], sent);
+        });
+    }
+
+    [Fact]
+    public Task TextInput_IsSuppressedOnlyUntilTheNextKey()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out var sent);
+            model.Feed(AllKeysAsEscapeCodes);
+
+            control.SimulateKeyDown(Key.A, KeyModifiers.None, "a", PhysicalKey.A);
+            control.SimulateKeyDown(Key.ImeProcessed);
+            control.SimulateTextInput("a");
+
+            Assert.Equal(["\u001b[97u", "a"], sent);
+        });
+    }
+
+    [Fact]
+    public Task TextInput_IsNotSuppressedAfterLosingFocus()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out var sent);
+            model.Feed(AllKeysAsEscapeCodes);
+
+            control.SimulateKeyDown(Key.A, KeyModifiers.None, "a", PhysicalKey.A);
+            control.SimulateLostFocus();
+            control.SimulateTextInput("a");
+
+            Assert.Equal(["\u001b[97u", "a"], sent);
         });
     }
 
@@ -511,9 +590,11 @@ public sealed class TerminalControlKittyKeyboardTests : AvaloniaTestBase
             return args;
         }
 
-        public void SimulateTextInput(string text)
+        public TextInputEventArgs SimulateTextInput(string text)
         {
-            OnTextInput(new TextInputEventArgs { Text = text });
+            var args = new TextInputEventArgs { Text = text };
+            OnTextInput(args);
+            return args;
         }
 
         public void SimulateLostFocus()
