@@ -306,9 +306,9 @@ public partial class TerminalControl : Grid
 
         Model.ClearSelection();
 
-        if (TrySendKittyKey(e, isRelease: false))
+        if (TrySendKittyKey(e, isRelease: false, out var keyText))
         {
-            MarkKeySent(e);
+            MarkKeySent(e, keyText);
             return;
         }
 
@@ -417,10 +417,12 @@ public partial class TerminalControl : Grid
         }
     }
 
-    private void MarkKeySent(KeyEventArgs e)
+    // Text input carries the key's symbol, or the letter or digit the key was translated to when
+    // the backend gives it none.
+    private void MarkKeySent(KeyEventArgs e, string? keyText = null)
     {
         e.Handled = true;
-        _textOfSentKey = e.KeySymbol;
+        _textOfSentKey = string.IsNullOrEmpty(e.KeySymbol) ? keyText : e.KeySymbol;
     }
 
     protected override void OnKeyUp(KeyEventArgs e)
@@ -428,7 +430,7 @@ public partial class TerminalControl : Grid
         ArgumentNullException.ThrowIfNull(e);
         base.OnKeyUp(e);
 
-        if (TrySendKittyKey(e, isRelease: true))
+        if (TrySendKittyKey(e, isRelease: true, out _))
         {
             e.Handled = true;
         }
@@ -1331,8 +1333,11 @@ public partial class TerminalControl : Grid
 
     // Encodes a key under the kitty keyboard protocol while the application has it switched on.
     // A false return leaves the key to the legacy path, or to text input when it only types.
-    private bool TrySendKittyKey(KeyEventArgs e, bool isRelease)
+    // The key text is the key as the protocol names it.
+    private bool TrySendKittyKey(KeyEventArgs e, bool isRelease, out string? keyText)
     {
+        keyText = null;
+
         if (Model == null)
         {
             return false;
@@ -1382,6 +1387,7 @@ public partial class TerminalControl : Grid
         }
 
         Model.Send(sequence);
+        keyText = keyEvent.Key;
         return true;
     }
 

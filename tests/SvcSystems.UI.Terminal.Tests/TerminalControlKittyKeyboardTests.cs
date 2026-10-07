@@ -394,6 +394,31 @@ public sealed class TerminalControlKittyKeyboardTests : AvaloniaTestBase
         });
     }
 
+    // A backend that gives the key no symbol types the letter or digit the key was translated to.
+    [Theory]
+    [InlineData(Key.A, KeyModifiers.None, PhysicalKey.A, "a", "\u001b[97u")]
+    [InlineData(Key.A, KeyModifiers.Shift, PhysicalKey.A, "A", "\u001b[97;2u")]
+    [InlineData(Key.D1, KeyModifiers.None, PhysicalKey.Digit1, "1", "\u001b[49u")]
+    public Task TextInput_OfAKeySentWithoutASymbol_IsNotSentAgain(
+        Key key,
+        KeyModifiers modifiers,
+        PhysicalKey physicalKey,
+        string text,
+        string expected)
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out var sent);
+            model.Feed(AllKeysAsEscapeCodes);
+
+            control.SimulateKeyDown(key, modifiers, physicalKey: physicalKey);
+            var input = control.SimulateTextInput(text);
+
+            Assert.Equal([expected], sent);
+            Assert.True(input.Handled);
+        });
+    }
+
     [Fact]
     public Task TextInput_ThatDiffersFromTheKeySent_IsStillSent()
     {
