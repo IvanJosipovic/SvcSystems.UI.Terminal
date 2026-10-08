@@ -18,4 +18,11 @@ public sealed class TerminalOptions
     public bool ConvertEol { get; set; }
 
     public bool ReflowOnResize { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the terminal answers the kitty keyboard protocol
+    /// query and honours the flags an application sets. When <c>false</c> the terminal stays
+    /// silent on the query, so applications keep to the legacy key encodings.
+    /// </summary>
+    public bool KittyKeyboardEnabled { get; set; } = true;
 }

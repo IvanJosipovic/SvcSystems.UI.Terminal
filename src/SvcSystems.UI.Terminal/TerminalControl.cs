@@ -3,17 +3,16 @@ using Avalonia.Controls;
 using Avalonia.Input.Platform;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
-using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
-using Avalonia.Styling;
 using System.Globalization;
-using System.Threading.Tasks;
 using Avalonia.Threading;
 using XTerm.Buffer;
 using Point = Avalonia.Point;
 using AvaloniaModifiers = Avalonia.Input.KeyModifiers;
+using EngineKeyEvent = XTerm.Options.KeyEvent;
+using KittyKeyboardEventType = XTerm.Input.KittyKeyboardEventType;
 using XKey = XTerm.Input.Key;
 using XMouseButton = XTerm.Input.MouseButton;
 using XMouseEventType = XTerm.Input.MouseEventType;
@@ -65,6 +64,11 @@ public partial class TerminalControl : Grid
     private readonly DispatcherTimer _selectionAutoScrollTimer;
     private readonly Dictionary<FormattedTextCacheKey, FormattedText> _formattedTextCache = [];
     private readonly Queue<FormattedTextCacheKey> _formattedTextCacheOrder = [];
+    private readonly Dictionary<PressedKeyId, PressedKey> _pressedKeys = [];
+
+    // Some backends raise TextInput even for a handled KeyDown, so the text of the last key
+    // already sent is held until the next key to keep it from being sent twice.
+    private string? _textOfSentKey;
 
     public TerminalControl()
     {
@@ -272,6 +276,8 @@ public partial class TerminalControl : Grid
                 newModel.UpdateUI = RefreshFromModel;
             }
 
+            _pressedKeys.Clear();
+            _textOfSentKey = null;
             SyncSelectionStateFromModel();
             UpdateScrollBar();
             ResizeModelToViewport();
@@ -291,6 +297,7 @@ public partial class TerminalControl : Grid
     {
         ArgumentNullException.ThrowIfNull(e);
         base.OnKeyDown(e);
+        _textOfSentKey = null;
 
         if (Model == null)
         {
@@ -298,6 +305,20 @@ public partial class TerminalControl : Grid
         }
 
         Model.ClearSelection();
+
+        if (TrySendKittyKey(e, isRelease: false, out var keyText))
+        {
+            MarkKeySent(e, keyText);
+            return;
+        }
+
+        // The protocol leaves Meta to the host, and the legacy encoder would drop it and send
+        // the bare key.
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Meta) && Model.Terminal.Engine.KittyKeyboardActive)
+        {
+            return;
+        }
+
         bool handled = false;
 
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
@@ -392,6 +413,25 @@ public partial class TerminalControl : Grid
 
         if (handled)
         {
+            MarkKeySent(e);
+        }
+    }
+
+    // Text input carries the key's symbol, or the letter or digit the key was translated to when
+    // the backend gives it none.
+    private void MarkKeySent(KeyEventArgs e, string? keyText = null)
+    {
+        e.Handled = true;
+        _textOfSentKey = string.IsNullOrEmpty(e.KeySymbol) ? keyText : e.KeySymbol;
+    }
+
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+        base.OnKeyUp(e);
+
+        if (TrySendKittyKey(e, isRelease: true, out _))
+        {
             e.Handled = true;
         }
     }
@@ -403,6 +443,14 @@ public partial class TerminalControl : Grid
 
         if (Model == null || string.IsNullOrEmpty(e.Text))
         {
+            return;
+        }
+
+        // Text that differs from the key, such as a composed or IME character, still goes through.
+        if (string.Equals(e.Text, _textOfSentKey, StringComparison.Ordinal))
+        {
+            _textOfSentKey = null;
+            e.Handled = true;
             return;
         }
 
@@ -561,6 +609,8 @@ public partial class TerminalControl : Grid
     {
         base.OnLostFocus(e);
         _hasFocus = false;
+        _textOfSentKey = null;
+        ReleasePressedKeys();
         _surface.InvalidateVisual();
     }
 
@@ -1281,6 +1331,114 @@ public partial class TerminalControl : Grid
         Model.Send(sequence);
     }
 
+    // Encodes a key under the kitty keyboard protocol while the application has it switched on.
+    // A false return leaves the key to the legacy path, or to text input when it only types.
+    // The key text is the key as the protocol names it.
+    private bool TrySendKittyKey(KeyEventArgs e, bool isRelease, out string? keyText)
+    {
+        keyText = null;
+
+        if (Model == null)
+        {
+            return false;
+        }
+
+        var keyId = PressedKeyId.From(e);
+        var engine = Model.Terminal.Engine;
+
+        if (!engine.KittyKeyboardActive)
+        {
+            _pressedKeys.Remove(keyId);
+            return false;
+        }
+
+        var keyEvent = KeyEventTranslator.Translate(e, Model.OptionAsMetaKey);
+        KittyKeyboardEventType eventType;
+
+        if (isRelease)
+        {
+            // Only a key that went down under the protocol is released under it. The release
+            // often carries no symbol, so it reports the key as it was pressed.
+            if (!_pressedKeys.Remove(keyId, out var pressed))
+            {
+                return false;
+            }
+
+            keyEvent.Key = pressed.Key;
+            keyEvent.Code = pressed.Code;
+            eventType = KittyKeyboardEventType.Release;
+        }
+        else
+        {
+            if (e.KeyModifiers.HasFlag(AvaloniaModifiers.Meta) || ScrollsViewport(e))
+            {
+                _pressedKeys.Remove(keyId);
+                return false;
+            }
+
+            eventType = _pressedKeys.ContainsKey(keyId) ? KittyKeyboardEventType.Repeat : KittyKeyboardEventType.Press;
+            _pressedKeys[keyId] = new PressedKey(keyEvent.Key, keyEvent.Code);
+        }
+
+        var sequence = engine.GenerateKittyKeyInput(keyEvent, eventType);
+        if (string.IsNullOrEmpty(sequence) || IsLeftToTextInput(e, sequence))
+        {
+            return false;
+        }
+
+        Model.Send(sequence);
+        keyText = keyEvent.Key;
+        return true;
+    }
+
+    // The key-up of a key held when the focus moves goes to whatever took the focus, so the
+    // keys still down are released here or the application never sees them go up.
+    private void ReleasePressedKeys()
+    {
+        if (_pressedKeys.Count == 0)
+        {
+            return;
+        }
+
+        PressedKey[] pressedKeys = [.. _pressedKeys.Values];
+        _pressedKeys.Clear();
+
+        if (Model is not { } model || !model.Terminal.Engine.KittyKeyboardActive)
+        {
+            return;
+        }
+
+        foreach (var pressed in pressedKeys)
+        {
+            var keyEvent = new EngineKeyEvent { Key = pressed.Key, Code = pressed.Code };
+            var sequence = model.Terminal.Engine.GenerateKittyKeyInput(keyEvent, KittyKeyboardEventType.Release);
+            if (!string.IsNullOrEmpty(sequence))
+            {
+                model.Send(sequence);
+            }
+        }
+    }
+
+    private bool ScrollsViewport(KeyEventArgs e)
+    {
+        const AvaloniaModifiers sentToTheApplication = AvaloniaModifiers.Control | AvaloniaModifiers.Alt;
+
+        return e.Key is Key.PageUp or Key.PageDown
+            && (e.KeyModifiers & sentToTheApplication) == AvaloniaModifiers.None
+            && Model?.Terminal.Engine.ApplicationCursorKeys == false;
+    }
+
+    // Text reaches the application through text input, which is also how composed and
+    // dead-key characters arrive, so a key that only types is not sent from here as well.
+    private static bool IsLeftToTextInput(KeyEventArgs e, string sequence)
+    {
+        const AvaloniaModifiers sentFromKeyDown = AvaloniaModifiers.Control | AvaloniaModifiers.Alt;
+
+        return (e.KeyModifiers & sentFromKeyDown) == AvaloniaModifiers.None
+            && sequence.Length == 1
+            && !char.IsControl(sequence[0]);
+    }
+
     private bool TrySendGeneratedKey(Key key, AvaloniaModifiers modifiers)
     {
         if (Model == null || !TryMapKey(key, out var mappedKey, out var extraModifiers))
@@ -1825,6 +1983,20 @@ internal readonly record struct FormattedTextCacheKey(
     FontWeight FontWeight,
     FontStyle FontStyle,
     TextDecorationFlags TextDecorations);
+
+internal readonly record struct PressedKeyId(PhysicalKey PhysicalKey, Key Key)
+{
+    public static PressedKeyId From(KeyEventArgs e)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+
+        return e.PhysicalKey == PhysicalKey.None
+            ? new PressedKeyId(PhysicalKey.None, e.Key)
+            : new PressedKeyId(e.PhysicalKey, Key.None);
+    }
+}
+
+internal readonly record struct PressedKey(string Key, string Code);
 
 [Flags]
 internal enum TextDecorationFlags
