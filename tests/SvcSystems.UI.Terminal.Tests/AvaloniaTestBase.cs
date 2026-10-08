@@ -1,6 +1,5 @@
 using Avalonia;
 using Avalonia.Headless;
-using Avalonia.Markup.Xaml.Styling;
 using Avalonia.Themes.Fluent;
 using SvcSystems.UI.Terminal;
 using System.Threading;
@@ -37,10 +36,6 @@ public sealed class TestApp : Application
     {
         Styles.Add(new FluentTheme());
 
-        const string colorsUri = "avares://SvcSystems.UI.Terminal/Styles/Colors.axaml";
-        Styles.Add(new StyleInclude(new Uri(colorsUri))
-        {
-            Source = new Uri(colorsUri),
-        });
+        Styles.Add(new TerminalTheme());
     }
 }
