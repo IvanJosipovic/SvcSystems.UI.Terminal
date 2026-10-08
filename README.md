@@ -305,7 +305,6 @@ In XAML, declare the terminal namespace and add `TerminalTheme` to the applicati
 
 URI-based `StyleInclude` loading of `Styles/Colors.axaml` remains supported for compatibility, but is deprecated. New applications should use `TerminalTheme` as shown above.
 
-Avalonia 12.1.3 resolves URI assembly names by prefix among already loaded assemblies. If an assembly such as `SvcSystems.UI.Terminal.Tests` is loaded before `SvcSystems.UI.Terminal`, legacy URI loading can resolve the wrong assembly. Class-based `TerminalTheme` loading avoids this ambiguity.
 
 `TerminalTheme` provides:
 
