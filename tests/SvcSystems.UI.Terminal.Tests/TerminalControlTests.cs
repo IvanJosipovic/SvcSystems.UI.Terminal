@@ -256,6 +256,35 @@ public sealed class TerminalControlTests : AvaloniaTestBase
         });
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task TerminalTheme_LoadingExportsTheCompletePalette(bool useLegacyUri)
+    {
+        return RunInHeadlessSession(() =>
+        {
+            Avalonia.Styling.Styles styles = new();
+            if (useLegacyUri)
+            {
+                Uri uri = new("avares://SvcSystems.UI.Terminal/Styles/Colors.axaml");
+                styles.Add(new Avalonia.Markup.Xaml.Styling.StyleInclude(uri)
+                {
+                    Source = uri,
+                });
+            }
+            else
+            {
+                styles.Add(new TerminalTheme());
+            }
+
+            for (int index = 0; index < 256; index++)
+            {
+                Assert.True(styles.TryGetResource($"SvcSystems.UI.TerminalColor{index}", null, out object? resource));
+                Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(resource);
+            }
+        });
+    }
+
     [Fact]
     public Task TerminalControl_DefaultColorSentinelsResolveByValue()
     {
