@@ -183,7 +183,9 @@ def run(request):
     for key in terminal_identity_variables:
         env.pop(key, None)
     env.update({"TERM": "xterm-256color", "COLORTERM": "truecolor"})
-    python_bin_directory = str(pathlib.Path(sys.executable).resolve().parent)
+    # Keep the venv's bin directory: resolving its Python symlink points back to the base
+    # interpreter and hides console scripts installed into the venv (including ucs-detect).
+    python_bin_directory = str(pathlib.Path(sys.executable).parent)
     user_script_directory = str(pathlib.Path(site.getuserbase()) / "bin")
     env["PATH"] = os.pathsep.join(
         part for part in (python_bin_directory, user_script_directory, env.get("PATH", "")) if part
