@@ -13,7 +13,6 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\SvcSystems.UI.Terminal\SvcSystems.UI.Terminal.csproj" />
     <ProjectReference Include="..\..\src\SvcSystems.UI.Terminal.Samples\SvcSystems.UI.Terminal.Samples.csproj" />
-    <ProjectReference Include="..\..\src\XTerm.NET\XTerm.NET.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -27,7 +26,6 @@
 
   <ItemGroup>
     <None Include="ucs_detect_pty.py" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="Fixtures\wcwidth-parity.rle" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

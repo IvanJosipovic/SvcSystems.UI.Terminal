@@ -5,7 +5,6 @@
     <File Path="README.md" />
   </Folder>
   <Project Path="src/SvcSystems.UI.Terminal.Desktop/SvcSystems.UI.Terminal.Desktop.csproj" />
-  <Project Path="src/XTerm.NET/XTerm.NET.csproj" />
   <Project Path="benchmarks/SvcSystems.UI.Terminal.Benchmarks/SvcSystems.UI.Terminal.Benchmarks.csproj" />
   <Project Path="src/SvcSystems.UI.Terminal.Samples/SvcSystems.UI.Terminal.Samples.csproj" />
   <Project Path="src/SvcSystems.UI.Terminal/SvcSystems.UI.Terminal.csproj" />

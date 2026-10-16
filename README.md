@@ -493,12 +493,8 @@ package before creating the environment. The PTY helper also includes Python's u
 directory on `PATH` for environments provisioned with user-installed CLI dependencies.
 
 Both the .NET 10 and .NET 11 SDKs/runtimes are required to run both target frameworks; the
-Linux compliance workflow installs both. [`src/XTerm.NET`](src/XTerm.NET/UPSTREAM.md) is a small,
-MIT-licensed source fork of XTerm.NET 3.0.0. It keeps the dependency's parser and engine in the
-normal project-reference boundary while allowing the Unicode 18 width tables and iTerm2 sizing
-fixes to be built and tested here. The UI NuGet package bundles the corresponding `XTerm.NET.dll`
-and does not depend on the unpatched upstream 3.0.0 package. The compatibility layer does not
-rewrite terminal text or silently remove image dimensions.
+Linux compliance workflow installs both. The control uses the published XTerm.NET 3.0.0 NuGet
+package for terminal emulation.
 
 The supported dependency versions are pinned in `tests/requirements-ucs-detect.txt`. The test fails
 with setup instructions when the Python environment or an expected CLI result is missing.
@@ -511,15 +507,15 @@ asserts the control loses capabilities only on the ConPTY path. Enable it with
 `UCS_DETECT_CONPTY_COMPARE=1` (Windows with the provisioned WSL environment only); it is skipped
 otherwise so normal and CI runs are unaffected.
 
-Every Unicode category in the pinned detector is asserted at 100%, and each `ucs-detect` detector
-function is checked by its own named test case, including every DEC private mode reported by
-`--detect-all-dec-modes`. A separate parity test replays all Unicode codepoints against the pinned
-`wcwidth` 0.9.2 / Unicode 18 table used to generate the engine's width ranges. Engine regressions
-exercise Unicode 18 wide cells, leading Tai Tham clusters without inserting synthetic text, and
-iTerm2 inline images with explicit cell dimensions. Running the extra DEC-mode probe adds only a
-small amount of time to each run (roughly two to three minutes total, well within the 30-minute test
-timeout). Font coverage results report the selected font's actual glyph coverage; the suite validates
-the result without requiring universal font coverage.
+Each supported `ucs-detect` Unicode category is asserted at 100%, and detector functions are checked
+by named test cases, including every DEC private mode reported by `--detect-all-dec-modes`. Tests
+that require behavior missing from published XTerm.NET 3.0.0 are explicitly skipped: Unicode 18 wide
+widths, the tested Tai Tham cluster, Khün language conformance, sized iTerm2 images, and SGR overline.
+The iTerm2 feature/capability checks that disagree with the package's hard-coded response are also
+skipped. Re-enable these tests when the upstream fixes are available in a published package. Running
+the extra DEC-mode probe adds only a small amount of time to each run (roughly two to three minutes
+total, well within the 30-minute test timeout). Font coverage results report the selected font's
+actual glyph coverage; the suite validates the result without requiring universal font coverage.
 
 The reference Iciclecreek.Avalonia.Terminal control also references XTerm.NET 3.0.0.
 Its checked-in compliance screenshot identifies XTerm.NET 2.0.0; that screenshot does not
