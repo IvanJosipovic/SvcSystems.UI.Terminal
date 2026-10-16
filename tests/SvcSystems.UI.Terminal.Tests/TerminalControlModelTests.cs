@@ -535,6 +535,24 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task Feed_UnderlineColorPreservesIndexedVersusRgbMode()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            using TerminalControlModel model = new();
+
+            model.Feed("\u001b[4:1;58:5:255mI\u001b[59;58:2::0:0:255mR");
+
+            ViewportTextRun indexed = Assert.Single(model.ViewportRows[0].Runs, static run => run.StartColumn == 0);
+            ViewportTextRun rgb = Assert.Single(model.ViewportRows[0].Runs, static run => run.StartColumn == 1);
+            Assert.Equal(255, indexed.UnderlineColor);
+            Assert.False(indexed.UnderlineColorIsRgb);
+            Assert.Equal(255, rgb.UnderlineColor);
+            Assert.True(rgb.UnderlineColorIsRgb);
+        });
+    }
+
+    [Fact]
     public Task Feed_WideCharacterProducesSingleWidthTwoRun()
     {
         return RunInHeadlessSession(() =>

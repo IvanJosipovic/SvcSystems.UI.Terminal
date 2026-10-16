@@ -707,6 +707,7 @@ public partial class TerminalControlModel : AvaloniaObject, IDisposable
                 styleKey.Italic ? FontStyle.Italic : FontStyle.Normal,
                 styleKey.UnderlineStyle,
                 styleKey.UnderlineColor,
+                styleKey.UnderlineColorIsRgb,
                 styleKey.Overline,
                 styleKey.Dim,
                 styleKey.Invisible,
@@ -750,6 +751,7 @@ public partial class TerminalControlModel : AvaloniaObject, IDisposable
             styleKey.Italic ? FontStyle.Italic : FontStyle.Normal,
             styleKey.UnderlineStyle,
             styleKey.UnderlineColor,
+            styleKey.UnderlineColorIsRgb,
             styleKey.Overline,
             styleKey.Dim,
             styleKey.Invisible,
@@ -787,6 +789,7 @@ public partial class TerminalControlModel : AvaloniaObject, IDisposable
             (fg, bg) = (bg, fg);
         }
 
+        bool hasUnderlineColor = attribute.TryGetUnderlineColor(out int underlineColor, out int underlineColorMode);
         return new ViewportStyleKey(
             fg,
             bg,
@@ -794,7 +797,8 @@ public partial class TerminalControlModel : AvaloniaObject, IDisposable
             attribute.IsDim(),
             attribute.IsItalic(),
             attribute.GetUnderlineStyle(),
-            attribute.TryGetUnderlineColor(out int underlineColor, out _) ? underlineColor : -1,
+            hasUnderlineColor ? underlineColor : -1,
+            hasUnderlineColor && underlineColorMode == 1,
             attribute.IsOverline(),
             attribute.IsInvisible(),
             attribute.IsStrikethrough());
@@ -821,6 +825,7 @@ internal readonly record struct ViewportTextRun(
     FontStyle FontStyle,
     UnderlineStyle UnderlineStyle,
     int UnderlineColor,
+    bool UnderlineColorIsRgb,
     bool Overline,
     bool Dim,
     bool Invisible,
@@ -835,6 +840,7 @@ internal readonly record struct ViewportStyleKey(
     bool Italic,
     UnderlineStyle UnderlineStyle,
     int UnderlineColor,
+    bool UnderlineColorIsRgb,
     bool Overline,
     bool Invisible,
     bool Strikethrough);

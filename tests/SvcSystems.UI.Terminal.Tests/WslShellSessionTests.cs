@@ -61,6 +61,74 @@ public sealed class WslShellSessionTests
     }
 
     [Fact]
+    public void ConPtyDiagnostic_UsesTheSamePythonAndQuotesReportPath()
+    {
+        const string python = "/home/test user/.venvs/ucs/bin/python";
+        const string report = "/mnt/c/work tree/results/ucs report.json";
+
+        string command = UcsDetectConPtyComparisonTests.BuildConPtyProbeCommand(python, report);
+
+        Assert.Contains("python_executable='/home/test user/.venvs/ucs/bin/python'", command, StringComparison.Ordinal);
+        Assert.Contains("--save-json '/mnt/c/work tree/results/ucs report.json'", command, StringComparison.Ordinal);
+        Assert.Contains("python_bin_directory", command, StringComparison.Ordinal);
+        Assert.Contains("user_script_directory", command, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ConPtyDiagnostic_UsesCurrentUcsDetectEnvironmentAndShellEscapesEveryArgument()
+    {
+        string command = UcsDetectConPtyComparisonTests.BuildConPtyProbeCommand(
+            "python3",
+            "/mnt/c/work tree's/report file.json");
+
+        Assert.Contains("python_executable=python3", command, StringComparison.Ordinal);
+        Assert.Contains("--save-json '/mnt/c/work tree'\\''s/report file.json'", command, StringComparison.Ordinal);
+        Assert.Contains("exec ucs-detect", command, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CreateShellSession_SubscriptionReceivesOutputProducedImmediatelyOnStart()
+    {
+        FakeShellSession session = new(emitOutputOnStart: true);
+        byte[]? received = null;
+
+        IShellSession created = ShellControl.CreateShellSession(
+            new ShellLaunchConfiguration("bash", ["-i"], "bash"),
+            isWindowsOverride: false,
+            redirectedFactory: _ => session,
+            beforeStart: candidate => candidate.DataReceived += data => received = data);
+
+        Assert.Same(session, created);
+        Assert.Equal(new byte[] { 0x41 }, received);
+    }
+
+    [Theory]
+    [InlineData(false, false, true, true, 2, true)]
+    [InlineData(false, false, true, false, 0, true)]
+    [InlineData(false, false, true, false, 1, true)]
+    [InlineData(false, false, true, false, 2, false)]
+    [InlineData(false, true, true, true, 0, false)]
+    [InlineData(true, false, true, true, 0, false)]
+    [InlineData(false, false, false, true, 0, false)]
+    public void ShouldRestartResizeWorker_OnlyKeepsPendingWorkWhenSessionCanRetry(
+        bool isDisposed,
+        bool processExited,
+        bool hasPendingResize,
+        bool hasResolvedDevice,
+        int resolutionCycles,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            WslShellSession.ShouldRestartResizeWorker(
+                isDisposed,
+                processExited,
+                hasPendingResize,
+                hasResolvedDevice,
+                resolutionCycles));
+    }
+
+    [Fact]
     public void CreateShellSession_PrefersWslWhenAvailable()
     {
         var wsl = new FakeShellSession();
@@ -133,13 +201,9 @@ public sealed class WslShellSessionTests
         Assert.True(redirected.Started);
     }
 
-    private sealed class FakeShellSession : IShellSession
+    private sealed class FakeShellSession(bool emitOutputOnStart = false) : IShellSession
     {
-        public event Action<byte[]>? DataReceived
-        {
-            add { }
-            remove { }
-        }
+        public event Action<byte[]>? DataReceived;
 
         public event Action<int>? Exited
         {
@@ -149,7 +213,14 @@ public sealed class WslShellSessionTests
 
         public bool Started { get; private set; }
 
-        public void Start() => Started = true;
+        public void Start()
+        {
+            Started = true;
+            if (emitOutputOnStart)
+            {
+                DataReceived?.Invoke([0x41]);
+            }
+        }
 
         public void Send(byte[] input)
         {

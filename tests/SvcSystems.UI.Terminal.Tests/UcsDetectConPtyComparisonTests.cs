@@ -99,7 +99,7 @@ public sealed class UcsDetectConPtyComparisonTests : AvaloniaTestBase
         try
         {
             SortedDictionary<string, string> directSummary = Summarize(direct.Report);
-            using JsonDocument conptyReport = await RunConPtyProbeAsync(conptyReportPath);
+            using JsonDocument conptyReport = await RunConPtyProbeAsync(conptyReportPath, direct.PythonExecutable);
             SortedDictionary<string, string> conptySummary = Summarize(conptyReport);
 
             List<string> differences = [];
@@ -162,7 +162,7 @@ public sealed class UcsDetectConPtyComparisonTests : AvaloniaTestBase
         }
     }
 
-    private async Task<JsonDocument> RunConPtyProbeAsync(string windowsReportPath)
+    private async Task<JsonDocument> RunConPtyProbeAsync(string windowsReportPath, string pythonExecutable)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(windowsReportPath)!);
         string wslReportPath = ToWslPath(windowsReportPath);
@@ -194,21 +194,7 @@ public sealed class UcsDetectConPtyComparisonTests : AvaloniaTestBase
             return created;
         });
 
-        // Mirrors the documented way to probe the sample with the Linux VT-query backend.
-        string command = string.Join(
-            " ",
-            "ucs-detect",
-            "--test-only all",
-            "--all",
-            "--terminal-full-probe",
-            "--detect-all-dec-modes",
-            "--probe-silently",
-            "--limit-category-time 0",
-            "--limit-errors 0",
-            "--timeout-cps 3.0",
-            "--timeout-query auto",
-            $"--save-json {wslReportPath}",
-            "--no-final-summary");
+        string command = BuildConPtyProbeCommand(pythonExecutable, wslReportPath);
 
         WindowsConPtyShellSession session = new(
             new ShellLaunchConfiguration(
@@ -400,5 +386,34 @@ public sealed class UcsDetectConPtyComparisonTests : AvaloniaTestBase
         string drive = char.ToLowerInvariant(fullPath[0]).ToString(CultureInfo.InvariantCulture);
         string relative = fullPath[3..].Replace('\\', '/');
         return $"/mnt/{drive}/{relative}";
+    }
+
+    internal static string BuildConPtyProbeCommand(string pythonExecutable, string wslReportPath)
+    {
+        string[] arguments =
+        [
+            "ucs-detect",
+            "--test-only", "all",
+            "--all",
+            "--terminal-full-probe",
+            "--detect-all-dec-modes",
+            "--probe-silently",
+            "--limit-category-time", "0",
+            "--limit-errors", "0",
+            "--timeout-cps", "3.0",
+            "--timeout-query", "auto",
+            "--save-json", wslReportPath,
+            "--no-final-summary",
+        ];
+
+        string detectorCommand = string.Join(" ", arguments.Select(WslShellSession.QuotePosixArgument));
+        string quotedPython = WslShellSession.QuotePosixArgument(pythonExecutable);
+        return string.Join(
+            "; ",
+            $"python_executable={quotedPython}",
+            "python_bin_directory=$(\"$python_executable\" -c 'import pathlib,sys; print(pathlib.Path(sys.executable).parent)')",
+            "user_script_directory=$(\"$python_executable\" -c 'import pathlib,site; print(pathlib.Path(site.getuserbase()) / \"bin\")')",
+            "export PATH=\"$python_bin_directory:$user_script_directory:$PATH\"",
+            $"exec {detectorCommand}");
     }
 }

@@ -2786,6 +2786,19 @@ public partial class TerminalControl : Grid
 
     private Brush ResolveColorBrush(int color)
     {
+        return ResolveColorBrush(color, isRgb: false);
+    }
+
+    private Brush ResolveColorBrush(int color, bool isRgb)
+    {
+        if (isRgb)
+        {
+            byte redComponent = (byte)((color >> 16) & 0xFF);
+            byte greenComponent = (byte)((color >> 8) & 0xFF);
+            byte blueComponent = (byte)(color & 0xFF);
+            return new SolidColorBrush(Color.FromRgb(redComponent, greenComponent, blueComponent));
+        }
+
         if (color == 256)
         {
             return ResolvePaletteBrush(15);
@@ -2817,6 +2830,7 @@ public partial class TerminalControl : Grid
             run.FontStyle,
             run.UnderlineStyle,
             run.UnderlineColor,
+            run.UnderlineColorIsRgb,
             run.Overline,
             run.Dim,
             run.Invisible,
@@ -2894,7 +2908,9 @@ public partial class TerminalControl : Grid
         double top = _consoleTextSize.Height * rowIndex;
         double bottom = top + _consoleTextSize.Height;
         double thickness = Math.Max(1, _consoleTextSize.Height / 16);
-        IBrush underlineBrush = ResolveColorBrush(run.UnderlineColor >= 0 ? run.UnderlineColor : run.ForegroundColor);
+        IBrush underlineBrush = run.UnderlineColor >= 0
+            ? ResolveColorBrush(run.UnderlineColor, run.UnderlineColorIsRgb)
+            : ResolveColorBrush(run.ForegroundColor);
 
         if (run.Overline)
         {
@@ -3001,6 +3017,9 @@ public partial class TerminalControl : Grid
     internal IBrush SelectionBrushForTests => ResolveSelectionBrush();
     internal IBrush ResolveXtermColorForTests(int xtermColor) => ResolvePaletteBrush(xtermColor);
     internal IBrush ResolveColorForTests(int color) => ResolveColorBrush(color);
+    internal IBrush ResolveUnderlineColorForTests(ViewportTextRun run) => run.UnderlineColor >= 0
+        ? ResolveColorBrush(run.UnderlineColor, run.UnderlineColorIsRgb)
+        : ResolveColorBrush(run.ForegroundColor);
 }
 
 internal readonly record struct FormattedTextCacheKey(
@@ -3011,6 +3030,7 @@ internal readonly record struct FormattedTextCacheKey(
     FontStyle FontStyle,
     UnderlineStyle UnderlineStyle,
     int UnderlineColor,
+    bool UnderlineColorIsRgb,
     bool Overline,
     bool Dim,
     bool Invisible,

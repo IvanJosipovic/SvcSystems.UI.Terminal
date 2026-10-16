@@ -59,6 +59,9 @@ public sealed class UcsDetectTerminalFixture : AvaloniaTestBase, IAsyncLifetime
 
     public string TranscriptPath { get; private set; } = string.Empty;
 
+    internal string PythonExecutable => _pythonExecutable ??
+        throw new InvalidOperationException("The Python environment was not initialized.");
+
     public async ValueTask InitializeAsync()
     {
         const string helperName = "ucs_detect_pty.py";
@@ -391,16 +394,18 @@ public sealed class UcsDetectTerminalFixture : AvaloniaTestBase, IAsyncLifetime
     private async Task RunAsync()
     {
         Process bridge = _bridge ?? throw new InvalidOperationException("The bridge was not started.");
+        byte[] frameKindBuffer = new byte[1];
         while (true)
         {
-            int frameKind = bridge.StandardOutput.BaseStream.ReadByte();
-            if (frameKind < 0)
+            int frameKindBytesRead = await bridge.StandardOutput.BaseStream.ReadAsync(frameKindBuffer.AsMemory());
+            if (frameKindBytesRead == 0)
             {
                 await bridge.WaitForExitAsync().WaitAsync(ProcessExitTimeout);
                 throw new InvalidOperationException(
                     $"ucs-detect PTY bridge exited without a completion frame (code {bridge.ExitCode}). " +
                     $"stderr: {await SafeReadStandardErrorAsync()}");
             }
+            int frameKind = frameKindBuffer[0];
 
             byte[] header = new byte[4];
             await bridge.StandardOutput.BaseStream.ReadExactlyAsync(header);

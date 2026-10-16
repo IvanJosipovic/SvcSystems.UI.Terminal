@@ -1,4 +1,5 @@
 using Avalonia.Input;
+using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia;
 using Avalonia.Threading;
@@ -130,8 +131,28 @@ public sealed class TerminalControlCapabilityTests : AvaloniaTestBase
             using RenderTargetBitmap bitmap = new(new PixelSize(160, 64));
             bitmap.Render(control);
             Assert.True(control.CanRenderTextForTests);
-            bitmap.Save(@"C:\Users\ivanj\AppData\Local\Temp\opencode\underline-style.png", PngBitmapEncoderOptions.Default);
             Assert.True(BitmapPixelAssertions.ContainsRedPixel(bitmap), $"The {expectedStyle} underline/overline did not render with its requested color.");
+        });
+    }
+
+    [Fact]
+    public Task TruecolorUnderlineBlue_IsNotInterpretedAsPaletteIndex()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            using TerminalControlModel model = new();
+            TerminalControl control = new() { Model = model, Width = 160, Height = 64 };
+            control.Measure(new Size(160, 64));
+            control.Arrange(new Rect(0, 0, 160, 64));
+
+            model.Feed($"{Esc}[4:1;58:2::0:0:255mA");
+            ViewportTextRun run = Assert.Single(model.ViewportRows[0].Runs, static item => item.StartColumn == 0);
+            Assert.Equal(255, run.UnderlineColor);
+            Assert.True(run.UnderlineColorIsRgb);
+
+            using RenderTargetBitmap bitmap = new(new PixelSize(160, 64));
+            bitmap.Render(control);
+            Assert.Equal(Colors.Blue, Assert.IsType<SolidColorBrush>(control.ResolveUnderlineColorForTests(run)).Color);
         });
     }
 

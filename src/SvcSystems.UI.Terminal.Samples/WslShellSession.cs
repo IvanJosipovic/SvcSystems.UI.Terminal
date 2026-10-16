@@ -30,6 +30,7 @@ internal sealed class WslShellSession : IShellSession
     private const string GuestDevicePrefix = "svc-terminal-pty-";
     private const string GuestDeviceExtension = ".tty";
     private const int DeviceResolutionAttempts = 20;
+    private const int MaximumDeviceResolutionCycles = 2;
     private static readonly TimeSpan GuestProbeTimeout = TimeSpan.FromSeconds(15);
 
     private static readonly TimeSpan DeviceResolutionDelay = TimeSpan.FromMilliseconds(150);
@@ -46,6 +47,8 @@ internal sealed class WslShellSession : IShellSession
     private string? _devicePath;
     private (int cols, int rows)? _pendingResize;
     private int _resizeWorkerActive;
+    private int _deviceResolutionCycles;
+    private bool _processExited;
     private bool _isDisposed;
 
     public WslShellSession(ShellLaunchConfiguration launch, int initialCols = 80, int initialRows = 25)
@@ -205,6 +208,12 @@ internal sealed class WslShellSession : IShellSession
         }
 
         Process process = new() { StartInfo = startInfo, EnableRaisingEvents = true };
+        lock (_syncRoot)
+        {
+            _processExited = false;
+            _deviceResolutionCycles = 0;
+        }
+
         process.Exited += OnProcessExited;
         if (!process.Start())
         {
@@ -212,7 +221,10 @@ internal sealed class WslShellSession : IShellSession
             throw new InvalidOperationException("Failed to start the WSL shell session.");
         }
 
-        _process = process;
+        lock (_syncRoot)
+        {
+            _process = process;
+        }
         _lifetime = new CancellationTokenSource();
         _ = PumpAsync(process.StandardOutput.BaseStream, _lifetime.Token);
         _ = PumpAsync(process.StandardError.BaseStream, _lifetime.Token);
@@ -245,9 +257,15 @@ internal sealed class WslShellSession : IShellSession
 
         lock (_syncRoot)
         {
-            if (_isDisposed || _process is null)
+            if (_isDisposed || _processExited || _process is null)
             {
                 return;
+            }
+
+            if (_devicePath is null && _resizeWorkerActive == 0 &&
+                _deviceResolutionCycles >= MaximumDeviceResolutionCycles)
+            {
+                _deviceResolutionCycles = 0;
             }
 
             _pendingResize = normalized;
@@ -333,17 +351,58 @@ internal sealed class WslShellSession : IShellSession
 
     private void OnProcessExited(object? sender, EventArgs e)
     {
-        Exited?.Invoke(_process?.ExitCode ?? 0);
+        int exitCode = sender is Process process ? process.ExitCode : 0;
+        lock (_syncRoot)
+        {
+            _processExited = true;
+            _pendingResize = null;
+        }
+
+        Exited?.Invoke(exitCode);
     }
 
     private async Task RunResizeWorkerAsync()
     {
         try
         {
-            string? device = _devicePath ?? await ResolveDevicePathAsync().ConfigureAwait(false);
+            string? device;
             lock (_syncRoot)
             {
-                _devicePath = device;
+                if (_isDisposed || _processExited || _process is null)
+                {
+                    return;
+                }
+
+                device = _devicePath;
+                if (device is null)
+                {
+                    if (_deviceResolutionCycles >= MaximumDeviceResolutionCycles)
+                    {
+                        _pendingResize = null;
+                        return;
+                    }
+
+                    _deviceResolutionCycles++;
+                }
+            }
+
+            if (device is null)
+            {
+                device = await ResolveDevicePathAsync().ConfigureAwait(false);
+                lock (_syncRoot)
+                {
+                    if (_isDisposed || _processExited)
+                    {
+                        _pendingResize = null;
+                        return;
+                    }
+
+                    _devicePath = device;
+                    if (device is null && _deviceResolutionCycles >= MaximumDeviceResolutionCycles)
+                    {
+                        _pendingResize = null;
+                    }
+                }
             }
 
             while (device is not null)
@@ -353,7 +412,7 @@ internal sealed class WslShellSession : IShellSession
                 {
                     size = _pendingResize;
                     _pendingResize = null;
-                    if (_isDisposed)
+                    if (_isDisposed || _processExited)
                     {
                         return;
                     }
@@ -381,7 +440,12 @@ internal sealed class WslShellSession : IShellSession
             lock (_syncRoot)
             {
                 _resizeWorkerActive = 0;
-                restart = !_isDisposed && _pendingResize is not null;
+                restart = ShouldRestartResizeWorker(
+                    _isDisposed,
+                    _processExited,
+                    _pendingResize is not null,
+                    _devicePath is not null,
+                    _deviceResolutionCycles);
                 if (restart)
                 {
                     _resizeWorkerActive = 1;
@@ -485,6 +549,17 @@ internal sealed class WslShellSession : IShellSession
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+    }
+
+    internal static bool ShouldRestartResizeWorker(
+        bool isDisposed,
+        bool processExited,
+        bool hasPendingResize,
+        bool hasResolvedDevice,
+        int deviceResolutionCycles)
+    {
+        return !isDisposed && !processExited && hasPendingResize &&
+            (hasResolvedDevice || deviceResolutionCycles < MaximumDeviceResolutionCycles);
     }
 
     private static void KillQuietly(Process process)

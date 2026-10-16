@@ -51,9 +51,9 @@ public partial class ShellControl : UserControl
 
             _session = CreateShellSession(
                 launch,
-                isWslAvailable: () => wslAvailable);
-            _session.DataReceived += OnSessionDataReceived;
-            _session.Exited += OnSessionExited;
+                isWslAvailable: () => wslAvailable,
+                beforeStart: SubscribeSession,
+                onStartFailed: UnsubscribeSession);
 
             ApplyShellResize(Math.Max(_shellModel.Terminal.Cols, 1), Math.Max(_shellModel.Terminal.Rows, 1));
         }
@@ -72,7 +72,9 @@ public partial class ShellControl : UserControl
         Func<ShellLaunchConfiguration, IShellSession>? redirectedFactory = null,
         Func<ShellLaunchConfiguration, IShellSession>? conPtyFactory = null,
         Func<ShellLaunchConfiguration, IShellSession>? wslFactory = null,
-        Func<bool>? isWslAvailable = null)
+        Func<bool>? isWslAvailable = null,
+        Action<IShellSession>? beforeStart = null,
+        Action<IShellSession>? onStartFailed = null)
     {
         redirectedFactory ??= static configuration => new RedirectedShellSession(configuration);
         conPtyFactory ??= static configuration => new WindowsConPtyShellSession(configuration);
@@ -90,8 +92,10 @@ public partial class ShellControl : UserControl
             try
             {
                 var wslSession = wslFactory(new ShellLaunchConfiguration("bash", ["-i"], "bash (WSL)"));
-                wslSession.Start();
-                return wslSession;
+                if (TryStartShellSession(wslSession, beforeStart, onStartFailed))
+                {
+                    return wslSession;
+                }
             }
             catch (Exception ex) when (IsShellSessionUnavailable(ex))
             {
@@ -103,8 +107,10 @@ public partial class ShellControl : UserControl
             try
             {
                 var conPtySession = conPtyFactory(launch);
-                conPtySession.Start();
-                return conPtySession;
+                if (TryStartShellSession(conPtySession, beforeStart, onStartFailed))
+                {
+                    return conPtySession;
+                }
             }
             catch (Exception ex) when (IsShellSessionUnavailable(ex))
             {
@@ -112,8 +118,71 @@ public partial class ShellControl : UserControl
         }
 
         var redirectedSession = redirectedFactory(launch);
-        redirectedSession.Start();
+        StartShellSession(redirectedSession, beforeStart, onStartFailed);
         return redirectedSession;
+    }
+
+    private static bool TryStartShellSession(
+        IShellSession session,
+        Action<IShellSession>? beforeStart,
+        Action<IShellSession>? onStartFailed)
+    {
+        try
+        {
+            StartShellSession(session, beforeStart, onStartFailed);
+            return true;
+        }
+        catch (Exception exception) when (IsShellSessionUnavailable(exception))
+        {
+            return false;
+        }
+    }
+
+    private static void StartShellSession(
+        IShellSession session,
+        Action<IShellSession>? beforeStart,
+        Action<IShellSession>? onStartFailed)
+    {
+        try
+        {
+            beforeStart?.Invoke(session);
+            session.Start();
+        }
+        catch
+        {
+            try
+            {
+                onStartFailed?.Invoke(session);
+            }
+            finally
+            {
+                session.Dispose();
+            }
+
+            throw;
+        }
+    }
+
+    private void SubscribeSession(IShellSession session)
+    {
+        if (_shellStopped)
+        {
+            throw new OperationCanceledException("The shell control detached before session startup.");
+        }
+
+        _session = session;
+        session.DataReceived += OnSessionDataReceived;
+        session.Exited += OnSessionExited;
+    }
+
+    private void UnsubscribeSession(IShellSession session)
+    {
+        session.DataReceived -= OnSessionDataReceived;
+        session.Exited -= OnSessionExited;
+        if (ReferenceEquals(_session, session))
+        {
+            _session = null;
+        }
     }
 
     internal static Dictionary<string, string> CreateShellEnvironment(
