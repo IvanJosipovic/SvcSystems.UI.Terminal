@@ -3,6 +3,8 @@ using Avalonia.Media;
 using PropertyGenerator.Avalonia;
 using System.Text;
 using XTerm.Buffer;
+using XTerm.Common;
+using XTerm.Graphics;
 using XTerm.Input;
 using XTerm.Selection;
 
@@ -10,6 +12,7 @@ namespace SvcSystems.UI.Terminal;
 
 public partial class TerminalControlModel : AvaloniaObject, IDisposable
 {
+    private static readonly ViewportImagePlacement[] EmptyImagePlacements = [];
     private bool _disposed;
 
     public TerminalControlModel(TerminalOptions? options = null)
@@ -18,6 +21,7 @@ public partial class TerminalControlModel : AvaloniaObject, IDisposable
         Terminal = new Terminal(options);
         SearchService = new SearchService(Terminal);
         Terminal.TitleChanged += OnTerminalTitleChanged;
+        Terminal.Engine.DataReceived += OnTerminalDataReceived;
         Terminal.Selection.SelectionChanged += HandleSelectionChanged;
 
         // trigger an update of the buffers
@@ -156,7 +160,8 @@ public partial class TerminalControlModel : AvaloniaObject, IDisposable
     public event EventHandler<TerminalSizeChangedEventArgs>? SizeChanged;
 
     /// <summary>
-    /// Invoked to raise input on the control, which should probably be sent to the actual child process or remote connection
+    /// Invoked when the terminal produces input for its connected process or remote connection,
+    /// including user input and replies to terminal queries.
     /// </summary>
     public event EventHandler<TerminalUserInputEventArgs>? UserInput;
 
@@ -195,6 +200,7 @@ public partial class TerminalControlModel : AvaloniaObject, IDisposable
         if (disposing)
         {
             Terminal.TitleChanged -= OnTerminalTitleChanged;
+            Terminal.Engine.DataReceived -= OnTerminalDataReceived;
             Terminal.Selection.SelectionChanged -= HandleSelectionChanged;
             Terminal.Dispose();
         }
@@ -214,6 +220,16 @@ public partial class TerminalControlModel : AvaloniaObject, IDisposable
 
         EnsureCaretIsVisible();
         UserInput?.Invoke(this, new TerminalUserInputEventArgs(data));
+    }
+
+    private void OnTerminalDataReceived(object? sender, XTerm.Events.TerminalEvents.DataEventArgs e)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        UserInput?.Invoke(this, new TerminalUserInputEventArgs(Encoding.UTF8.GetBytes(e.Data)));
     }
 
     public void Resize(double width, double height, double textWidth, double textHeight)
@@ -245,7 +261,7 @@ public partial class TerminalControlModel : AvaloniaObject, IDisposable
 
     public void UpdateDisplay()
     {
-        if (_disposed)
+        if (_disposed || Terminal.Engine.SynchronizedOutput)
         {
             return;
         }
@@ -573,10 +589,58 @@ public partial class TerminalControlModel : AvaloniaObject, IDisposable
         {
             var bufferLine = visibleStart + row;
             BufferLine? line = bufferLine < buffer.Lines.Length ? buffer.GetLine(bufferLine) : null;
-            rows.Add(new ViewportRow(row, BuildRowRuns(line, viewportCols)));
+            var sixel = line?.Sixel;
+            IReadOnlyList<ViewportImagePlacement> imagePlacements = BuildImagePlacements(line, out int behindImageCount);
+            rows.Add(new ViewportRow(
+                row,
+                BuildRowRuns(line, viewportCols),
+                imagePlacements,
+                behindImageCount,
+                sixel,
+                sixel is null ? 0 : Math.Min(sixel.PaintedColumns, viewportCols)));
         }
 
         ViewportRows = rows;
+    }
+
+    private static IReadOnlyList<ViewportImagePlacement> BuildImagePlacements(BufferLine? line, out int behindImageCount)
+    {
+        behindImageCount = 0;
+        if (line is null || line.Placements.Count == 0 || line.Images.Count == 0)
+        {
+            return EmptyImagePlacements;
+        }
+
+        List<ViewportImagePlacement> placements = new(line.Placements.Count);
+        foreach (LinePlacement placement in line.Placements)
+        {
+            if (placement.Kind == PlacementKind.Sixel)
+            {
+                continue;
+            }
+
+            foreach (TerminalImage image in line.Images)
+            {
+                if (image.Id == placement.ImageId)
+                {
+                    placements.Add(new ViewportImagePlacement(image, placement));
+                    break;
+                }
+            }
+        }
+
+        placements.Sort(static (left, right) =>
+        {
+            int zOrder = left.Placement.ZIndex.CompareTo(right.Placement.ZIndex);
+            return zOrder != 0 ? zOrder : left.Placement.Serial.CompareTo(right.Placement.Serial);
+        });
+
+        while (behindImageCount < placements.Count && placements[behindImageCount].Placement.ZIndex < 0)
+        {
+            behindImageCount++;
+        }
+
+        return placements;
     }
 
     private BufferPoint? _softSelectionStart;
@@ -587,6 +651,17 @@ public partial class TerminalControlModel : AvaloniaObject, IDisposable
 
         for (var cell = 0; cell < viewportCols;)
         {
+            if (line is not null && line.TryGetSizedRunAt(cell, out LineSizedRun sizedRun))
+            {
+                if (TryCreateSizedTextRun(line, sizedRun, viewportCols, out ViewportTextRun sizedTextRun))
+                {
+                    runs.Add(sizedTextRun);
+                }
+
+                cell = Math.Max(cell + 1, sizedRun.EndColumn);
+                continue;
+            }
+
             BufferCell bufferCell = line is null ? BufferCell.Space : line[cell];
             if (bufferCell.Width == 0)
             {
@@ -605,6 +680,11 @@ public partial class TerminalControlModel : AvaloniaObject, IDisposable
             {
                 while (cell < viewportCols)
                 {
+                    if (line is not null && line.TryGetSizedRunAt(cell, out _))
+                    {
+                        break;
+                    }
+
                     BufferCell nextCell = line is null ? BufferCell.Space : line[cell];
                     if (nextCell.Width != 1 || CreateStyleKey(nextCell) != styleKey)
                     {
@@ -625,10 +705,59 @@ public partial class TerminalControlModel : AvaloniaObject, IDisposable
                 styleKey.BackgroundColor,
                 styleKey.Bold ? FontWeight.Bold : FontWeight.Normal,
                 styleKey.Italic ? FontStyle.Italic : FontStyle.Normal,
-                CreateTextDecorations(styleKey)));
+                styleKey.UnderlineStyle,
+                styleKey.UnderlineColor,
+                styleKey.UnderlineColorIsRgb,
+                styleKey.Overline,
+                styleKey.Dim,
+                styleKey.Invisible,
+                styleKey.Strikethrough,
+                TextSizing.Default));
         }
 
         return runs;
+    }
+
+    internal static bool TryCreateSizedTextRun(
+        BufferLine line,
+        LineSizedRun sizedRun,
+        int maxColumns,
+        out ViewportTextRun textRun)
+    {
+        textRun = default;
+        if (sizedRun.Column < 0 ||
+            sizedRun.Column >= line.Length ||
+            sizedRun.Column >= maxColumns ||
+            sizedRun.Cols <= 0)
+        {
+            return false;
+        }
+
+        BufferCell cell = line[sizedRun.Column];
+        ViewportStyleKey styleKey = CreateStyleKey(cell);
+        int visibleWidth = Math.Min(sizedRun.Cols, Math.Min(line.Length - sizedRun.Column, maxColumns - sizedRun.Column));
+        if (visibleWidth <= 0)
+        {
+            return false;
+        }
+
+        textRun = new ViewportTextRun(
+            sizedRun.Column,
+            visibleWidth,
+            ConvertCellToRenderableText(cell),
+            styleKey.ForegroundColor,
+            styleKey.BackgroundColor,
+            styleKey.Bold ? FontWeight.Bold : FontWeight.Normal,
+            styleKey.Italic ? FontStyle.Italic : FontStyle.Normal,
+            styleKey.UnderlineStyle,
+            styleKey.UnderlineColor,
+            styleKey.UnderlineColorIsRgb,
+            styleKey.Overline,
+            styleKey.Dim,
+            styleKey.Invisible,
+            styleKey.Strikethrough,
+            sizedRun.Sizing);
+        return true;
     }
 
     private static string ConvertCellToRenderableText(BufferCell cell)
@@ -636,11 +765,6 @@ public partial class TerminalControlModel : AvaloniaObject, IDisposable
         if (cell.CodePoint == 0 || cell.Width <= 0)
         {
             return " ";
-        }
-
-        if (cell.CodePoint > 0xFFFF || cell.Content.Length > 1)
-        {
-            return "\uFFFD";
         }
 
         try
@@ -665,37 +789,31 @@ public partial class TerminalControlModel : AvaloniaObject, IDisposable
             (fg, bg) = (bg, fg);
         }
 
+        bool hasUnderlineColor = attribute.TryGetUnderlineColor(out int underlineColor, out int underlineColorMode);
         return new ViewportStyleKey(
             fg,
             bg,
             attribute.IsBold(),
+            attribute.IsDim(),
             attribute.IsItalic(),
-            attribute.IsUnderline(),
+            attribute.GetUnderlineStyle(),
+            hasUnderlineColor ? underlineColor : -1,
+            hasUnderlineColor && underlineColorMode == 1,
+            attribute.IsOverline(),
+            attribute.IsInvisible(),
             attribute.IsStrikethrough());
-    }
-
-    private static TextDecorationCollection? CreateTextDecorations(ViewportStyleKey styleKey)
-    {
-        TextDecorationCollection? decorations = null;
-        if (styleKey.Underline)
-        {
-            decorations = new TextDecorationCollection(TextDecorations.Underline);
-        }
-
-        if (styleKey.Strikethrough)
-        {
-            decorations ??= [];
-            decorations.Add(new TextDecoration
-            {
-                Location = TextDecorationLocation.Strikethrough,
-            });
-        }
-
-        return decorations;
     }
 }
 
-internal readonly record struct ViewportRow(int RowIndex, List<ViewportTextRun> Runs);
+internal readonly record struct ViewportRow(
+    int RowIndex,
+    List<ViewportTextRun> Runs,
+    IReadOnlyList<ViewportImagePlacement> Images,
+    int BehindImageCount,
+    SixelStrip? Sixel,
+    int SixelColumns);
+
+internal readonly record struct ViewportImagePlacement(TerminalImage Image, LinePlacement Placement);
 
 internal readonly record struct ViewportTextRun(
     int StartColumn,
@@ -705,14 +823,26 @@ internal readonly record struct ViewportTextRun(
     int BackgroundColor,
     FontWeight FontWeight,
     FontStyle FontStyle,
-    TextDecorationCollection? TextDecorations);
+    UnderlineStyle UnderlineStyle,
+    int UnderlineColor,
+    bool UnderlineColorIsRgb,
+    bool Overline,
+    bool Dim,
+    bool Invisible,
+    bool Strikethrough,
+    TextSizing Sizing);
 
 internal readonly record struct ViewportStyleKey(
     int ForegroundColor,
     int BackgroundColor,
     bool Bold,
+    bool Dim,
     bool Italic,
-    bool Underline,
+    UnderlineStyle UnderlineStyle,
+    int UnderlineColor,
+    bool UnderlineColorIsRgb,
+    bool Overline,
+    bool Invisible,
     bool Strikethrough);
 
 /// <summary>

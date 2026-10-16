@@ -17,6 +17,35 @@ public sealed class TerminalControlKittyKeyboardTests : AvaloniaTestBase
     private const string PopFlags = "\u001b[<u";
     private const string ApplicationCursorKeys = "\u001b[?1h";
 
+    [Fact]
+    public Task FocusReportingMode_SendsFocusInAndFocusOutToTheProcess()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            TestableTerminalControl control = CreateControl(out TerminalControlModel model, out List<string> sent);
+            model.Feed("\u001b[?1004h");
+
+            control.SimulateGotFocus();
+            control.SimulateLostFocus();
+
+            Assert.Equal(["\u001b[I", "\u001b[O"], sent);
+        });
+    }
+
+    [Fact]
+    public Task FocusReportingMode_DoesNotSendFocusEventsWhenDisabled()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            TestableTerminalControl control = CreateControl(out _, out List<string> sent);
+
+            control.SimulateGotFocus();
+            control.SimulateLostFocus();
+
+            Assert.Empty(sent);
+        });
+    }
+
     [Theory]
     [MemberData(nameof(PressCases))]
     public Task KeyPress_IsEncodedWithTheFlagsTheApplicationSet(
@@ -593,6 +622,11 @@ public sealed class TerminalControlKittyKeyboardTests : AvaloniaTestBase
 
     private sealed class TestableTerminalControl : TerminalControl
     {
+        public void SimulateGotFocus()
+        {
+            OnGotFocus(new FocusChangedEventArgs(GotFocusEvent));
+        }
+
         public KeyEventArgs SimulateKeyDown(
             Key key,
             KeyModifiers modifiers = KeyModifiers.None,

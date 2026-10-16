@@ -1,19 +1,25 @@
 using Avalonia.Controls;
 using SvcSystems.UI.Terminal;
 using Avalonia.Threading;
+using System.Collections;
 using System.Diagnostics;
 
 namespace SvcSystems.UI.Terminal.Samples;
 
 public partial class ShellControl : UserControl
 {
+    // The sample opts in to terminal-initiated clipboard reads so OSC 52 and Kitty clipboard
+    // requests exercise the real host clipboard integration.
     private readonly TerminalControlModel _shellModel = new(new TerminalOptions
     {
         ReflowOnResize = false,
+        ClipboardReadEnabled = true,
+        ClipboardWriteEnabled = true,
     });
     private (int cols, int rows)? _lastResize;
 
     private IShellSession? _session;
+    private bool _shellStopped;
 
     public ShellControl()
     {
@@ -28,19 +34,35 @@ public partial class ShellControl : UserControl
 
     private void StartShell()
     {
+        _ = StartShellAsync();
+    }
+
+    private async Task StartShellAsync()
+    {
         var launch = ResolveShellLaunchConfiguration();
 
         try
         {
-            _session = CreateShellSession(launch);
-            _session.DataReceived += OnSessionDataReceived;
-            _session.Exited += OnSessionExited;
+            bool wslAvailable = OperatingSystem.IsWindows() && await WslShellSession.IsAvailableAsync();
+            if (_shellStopped)
+            {
+                return;
+            }
+
+            _session = CreateShellSession(
+                launch,
+                isWslAvailable: () => wslAvailable,
+                beforeStart: SubscribeSession,
+                onStartFailed: UnsubscribeSession);
 
             ApplyShellResize(Math.Max(_shellModel.Terminal.Cols, 1), Math.Max(_shellModel.Terminal.Rows, 1));
         }
         catch (Exception ex)
         {
-            _shellModel.Feed($"Failed to start shell ({launch.DisplayName}).\r\n{ex.Message}\r\n");
+            if (!_shellStopped)
+            {
+                _shellModel.Feed($"Failed to start shell ({launch.DisplayName}).\r\n{ex.Message}\r\n");
+            }
         }
     }
 
@@ -48,28 +70,164 @@ public partial class ShellControl : UserControl
         ShellLaunchConfiguration launch,
         bool? isWindowsOverride = null,
         Func<ShellLaunchConfiguration, IShellSession>? redirectedFactory = null,
-        Func<ShellLaunchConfiguration, IShellSession>? conPtyFactory = null)
+        Func<ShellLaunchConfiguration, IShellSession>? conPtyFactory = null,
+        Func<ShellLaunchConfiguration, IShellSession>? wslFactory = null,
+        Func<bool>? isWslAvailable = null,
+        Action<IShellSession>? beforeStart = null,
+        Action<IShellSession>? onStartFailed = null)
     {
         redirectedFactory ??= static configuration => new RedirectedShellSession(configuration);
         conPtyFactory ??= static configuration => new WindowsConPtyShellSession(configuration);
+        wslFactory ??= static configuration => new WslShellSession(configuration);
+        // WSL probing boots the default distro and is asynchronous in StartShellAsync. This
+        // synchronous factory only takes the WSL path when its caller has already verified it.
+        isWslAvailable ??= static () => false;
 
         var isWindows = isWindowsOverride ?? OperatingSystem.IsWindows();
+
+        // A WSL session allocates its own PTY in the guest and exchanges VT with the control
+        // directly, so a detector run from this shell measures the control rather than ConPTY.
+        if (isWindows && isWslAvailable())
+        {
+            try
+            {
+                var wslSession = wslFactory(new ShellLaunchConfiguration("bash", ["-i"], "bash (WSL)"));
+                if (TryStartShellSession(wslSession, beforeStart, onStartFailed))
+                {
+                    return wslSession;
+                }
+            }
+            catch (Exception ex) when (IsShellSessionUnavailable(ex))
+            {
+            }
+        }
+
         if (isWindows)
         {
             try
             {
                 var conPtySession = conPtyFactory(launch);
-                conPtySession.Start();
-                return conPtySession;
+                if (TryStartShellSession(conPtySession, beforeStart, onStartFailed))
+                {
+                    return conPtySession;
+                }
             }
-            catch (Exception ex) when (IsConPtyUnavailable(ex))
+            catch (Exception ex) when (IsShellSessionUnavailable(ex))
             {
             }
         }
 
         var redirectedSession = redirectedFactory(launch);
-        redirectedSession.Start();
+        StartShellSession(redirectedSession, beforeStart, onStartFailed);
         return redirectedSession;
+    }
+
+    private static bool TryStartShellSession(
+        IShellSession session,
+        Action<IShellSession>? beforeStart,
+        Action<IShellSession>? onStartFailed)
+    {
+        try
+        {
+            StartShellSession(session, beforeStart, onStartFailed);
+            return true;
+        }
+        catch (Exception exception) when (IsShellSessionUnavailable(exception))
+        {
+            return false;
+        }
+    }
+
+    private static void StartShellSession(
+        IShellSession session,
+        Action<IShellSession>? beforeStart,
+        Action<IShellSession>? onStartFailed)
+    {
+        try
+        {
+            beforeStart?.Invoke(session);
+            session.Start();
+        }
+        catch
+        {
+            try
+            {
+                onStartFailed?.Invoke(session);
+            }
+            finally
+            {
+                session.Dispose();
+            }
+
+            throw;
+        }
+    }
+
+    private void SubscribeSession(IShellSession session)
+    {
+        if (_shellStopped)
+        {
+            throw new OperationCanceledException("The shell control detached before session startup.");
+        }
+
+        _session = session;
+        session.DataReceived += OnSessionDataReceived;
+        session.Exited += OnSessionExited;
+    }
+
+    private void UnsubscribeSession(IShellSession session)
+    {
+        session.DataReceived -= OnSessionDataReceived;
+        session.Exited -= OnSessionExited;
+        if (ReferenceEquals(_session, session))
+        {
+            _session = null;
+        }
+    }
+
+    internal static Dictionary<string, string> CreateShellEnvironment(
+        IEnumerable<KeyValuePair<string, string>>? inheritedEnvironment = null)
+    {
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var environment = new Dictionary<string, string>(comparer);
+
+        if (inheritedEnvironment is null)
+        {
+            foreach (DictionaryEntry entry in Environment.GetEnvironmentVariables())
+            {
+                environment[(string)entry.Key] = (string?)entry.Value ?? string.Empty;
+            }
+        }
+        else
+        {
+            foreach (var entry in inheritedEnvironment)
+            {
+                environment[entry.Key] = entry.Value;
+            }
+        }
+
+        environment.Remove("TERM_PROGRAM");
+        environment.Remove("TERM_PROGRAM_VERSION");
+        environment.Remove("KITTY_WINDOW_ID");
+        environment.Remove("KITTY_LISTEN_ON");
+        environment.Remove("WEZTERM_PANE");
+        environment.Remove("WEZTERM_UNIX_SOCKET");
+        environment.Remove("VTE_VERSION");
+        environment.Remove("KONSOLE_VERSION");
+        environment.Remove("KONSOLE_DBUS_SESSION");
+        environment.Remove("WT_SESSION");
+        environment.Remove("WT_PROFILE_ID");
+        environment.Remove("TMUX");
+        environment.Remove("TMUX_PANE");
+        environment.Remove("TERM_SESSION_ID");
+        environment.Remove("LC_TERMINAL");
+        environment.Remove("LC_TERMINAL_VERSION");
+        environment.Remove("COLUMNS");
+        environment.Remove("LINES");
+        environment["TERM"] = "xterm";
+        environment["COLORTERM"] = "truecolor";
+
+        return environment;
     }
 
     private void OnUserInput(object? sender, TerminalUserInputEventArgs e)
@@ -100,6 +258,7 @@ public partial class ShellControl : UserControl
 
     private void StopShell()
     {
+        _shellStopped = true;
         _shellModel.UserInput -= OnUserInput;
         _shellModel.SizeChanged -= OnTerminalSizeChanged;
 
@@ -266,12 +425,13 @@ public partial class ShellControl : UserControl
         return null;
     }
 
-    private static bool IsConPtyUnavailable(Exception ex)
+    private static bool IsShellSessionUnavailable(Exception ex)
     {
         return ex is PlatformNotSupportedException
             or EntryPointNotFoundException
             or DllNotFoundException
-            or InvalidOperationException;
+            or InvalidOperationException
+            or System.ComponentModel.Win32Exception;
     }
 }
 

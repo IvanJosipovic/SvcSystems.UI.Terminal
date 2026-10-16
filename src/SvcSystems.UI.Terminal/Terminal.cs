@@ -1,5 +1,5 @@
-using System.Text;
 using System.Diagnostics.CodeAnalysis;
+using XTerm.Common;
 using XTerm.Selection;
 using EngineTerminal = XTerm.Terminal;
 using EngineTerminalOptions = XTerm.Options.TerminalOptions;
@@ -25,14 +25,29 @@ public sealed class Terminal : IDisposable
             Rows = Math.Max(options.Rows, 1),
             Scrollback = Math.Max(options.Scrollback, 0),
             TabStopWidth = Math.Max(options.TabStopWidth, 1),
+            CellWidthPixels = Math.Max(options.CellWidthPixels, 1),
+            CellHeightPixels = Math.Max(options.CellHeightPixels, 1),
             ConvertEol = options.ConvertEol,
             TermName = options.TermName,
+            SixelEnabled = options.SixelEnabled,
+            KittyGraphicsEnabled = options.KittyGraphicsEnabled,
+            ITerm2ImagesEnabled = options.ITerm2ImagesEnabled,
+            KittyNotificationsEnabled = options.KittyNotificationsEnabled,
+            PointerShapesEnabled = options.PointerShapesEnabled,
             KittyKeyboardEnabled = options.KittyKeyboardEnabled,
+            ClipboardReadEnabled = options.ClipboardReadEnabled,
+            ClipboardWriteEnabled = options.ClipboardWriteEnabled,
+            WindowOptions = new()
+            {
+                GetWinSizePixels = true,
+                GetWinSizeChars = true,
+                GetCellSizePixels = true,
+            },
         };
 
         _terminal = new EngineTerminal(engineOptions);
-
         _terminal.TitleChanged += OnTitleChanged;
+        _terminal.WindowInfoRequested += OnWindowInfoRequested;
     }
 
     public event EventHandler<TitleChangedEventArgs>? TitleChanged;
@@ -51,10 +66,19 @@ public sealed class Terminal : IDisposable
         Rows = _terminal.Rows,
         Scrollback = _options.Scrollback,
         TabStopWidth = _options.TabStopWidth,
+        CellWidthPixels = _terminal.Options.CellWidthPixels,
+        CellHeightPixels = _terminal.Options.CellHeightPixels,
         TermName = _options.TermName,
         ConvertEol = _options.ConvertEol,
         ReflowOnResize = _options.ReflowOnResize,
+        SixelEnabled = _options.SixelEnabled,
+        KittyGraphicsEnabled = _options.KittyGraphicsEnabled,
+        ITerm2ImagesEnabled = _options.ITerm2ImagesEnabled,
+        KittyNotificationsEnabled = _options.KittyNotificationsEnabled,
+        PointerShapesEnabled = _options.PointerShapesEnabled,
         KittyKeyboardEnabled = _options.KittyKeyboardEnabled,
+        ClipboardReadEnabled = _options.ClipboardReadEnabled,
+        ClipboardWriteEnabled = _options.ClipboardWriteEnabled,
     };
 
     public int Cols => _terminal.Cols;
@@ -65,6 +89,7 @@ public sealed class Terminal : IDisposable
 
     public void Feed(string text)
     {
+        ArgumentNullException.ThrowIfNull(text);
         _terminal.Write(text);
     }
 
@@ -78,12 +103,23 @@ public sealed class Terminal : IDisposable
             return;
         }
 
-        _terminal.Write(Encoding.UTF8.GetString(data, 0, actualLength));
+        _terminal.Write(data.AsSpan(0, actualLength));
     }
 
     public void Resize(int cols, int rows)
     {
         _terminal.Resize(Math.Max(cols, 1), Math.Max(rows, 1));
+    }
+
+    internal void SetCellSizePixels(int width, int height)
+    {
+        width = Math.Max(width, 1);
+        height = Math.Max(height, 1);
+        _options.CellWidthPixels = width;
+        _options.CellHeightPixels = height;
+        _terminal.Options.CellWidthPixels = width;
+        _terminal.Options.CellHeightPixels = height;
+        _terminal.NotifyTextAreaPixelsChanged();
     }
 
     public void SwitchToAltBuffer()
@@ -101,6 +137,30 @@ public sealed class Terminal : IDisposable
         TitleChanged?.Invoke(this, new TitleChangedEventArgs(e.Title));
     }
 
+    private void OnWindowInfoRequested(object? sender, XTerm.Events.TerminalEvents.WindowInfoRequestedEventArgs e)
+    {
+        switch (e.Request)
+        {
+            case WindowInfoRequest.CellSizePixels:
+                e.CellWidth = _terminal.Options.CellWidthPixels;
+                e.CellHeight = _terminal.Options.CellHeightPixels;
+                e.Handled = e.CellWidth > 0 && e.CellHeight > 0;
+                break;
+
+            case WindowInfoRequest.SizePixels:
+                long width = (long)_terminal.Cols * _terminal.Options.CellWidthPixels;
+                long height = (long)_terminal.Rows * _terminal.Options.CellHeightPixels;
+                if (width is > 0 and <= int.MaxValue && height is > 0 and <= int.MaxValue)
+                {
+                    e.WidthPixels = (int)width;
+                    e.HeightPixels = (int)height;
+                    e.Handled = true;
+                }
+
+                break;
+        }
+    }
+
     /// <summary>
     /// Releases the underlying XTerm.NET terminal. Further calls are ignored.
     /// </summary>
@@ -113,6 +173,7 @@ public sealed class Terminal : IDisposable
 
         _disposed = true;
         _terminal.TitleChanged -= OnTitleChanged;
+        _terminal.WindowInfoRequested -= OnWindowInfoRequested;
         _terminal.Dispose();
     }
 }

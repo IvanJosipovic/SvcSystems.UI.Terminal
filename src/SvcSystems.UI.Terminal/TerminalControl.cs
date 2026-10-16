@@ -1,22 +1,25 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.Text;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Input.Platform;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Avalonia.Media.TextFormatting;
-using System.Globalization;
 using Avalonia.Threading;
 using XTerm.Buffer;
-using Point = Avalonia.Point;
-using AvaloniaModifiers = Avalonia.Input.KeyModifiers;
-using EngineKeyEvent = XTerm.Options.KeyEvent;
-using KittyKeyboardEventType = XTerm.Input.KittyKeyboardEventType;
+using XTerm.Common;
+using XTerm.Input;
+using XTerm.Options;
+using Key = Avalonia.Input.Key;
+using KeyModifiers = Avalonia.Input.KeyModifiers;
+using MouseButton = Avalonia.Input.MouseButton;
 using XKey = XTerm.Input.Key;
 using XMouseButton = XTerm.Input.MouseButton;
-using XMouseEventType = XTerm.Input.MouseEventType;
-using XMouseTrackingMode = XTerm.Input.MouseTrackingMode;
 using XTermModifiers = XTerm.Input.KeyModifiers;
 
 namespace SvcSystems.UI.Terminal;
@@ -24,7 +27,25 @@ namespace SvcSystems.UI.Terminal;
 public partial class TerminalControl : Grid
 {
     private static readonly TimeSpan SelectionAutoScrollInterval = TimeSpan.FromMilliseconds(80);
+    private static readonly TimeSpan DefaultRedrawInterval = TimeSpan.FromSeconds(1d / 30);
     private static readonly Brush[] FallbackXtermPalette = CreateFallbackXtermPalette();
+    // Standard cursor handles are immutable platform resources; sharing them avoids allocating a
+    // disposable cursor for every OSC 22 update and keeps their lifetime independent of one view.
+    private static readonly Cursor CrossCursor = new(StandardCursorType.Cross);
+    private static readonly Cursor HorizontalResizeCursor = new(StandardCursorType.SizeWestEast);
+    private static readonly Cursor VerticalResizeCursor = new(StandardCursorType.SizeNorthSouth);
+    private static readonly Cursor AllResizeCursor = new(StandardCursorType.SizeAll);
+    private static readonly Cursor NorthEastSouthWestResizeCursor = new(StandardCursorType.TopRightCorner);
+    private static readonly Cursor NorthWestSouthEastResizeCursor = new(StandardCursorType.TopLeftCorner);
+    private static readonly Cursor SouthEastResizeCursor = new(StandardCursorType.BottomRightCorner);
+    private static readonly Cursor SouthWestResizeCursor = new(StandardCursorType.BottomLeftCorner);
+    private static readonly Cursor HandCursor = new(StandardCursorType.Hand);
+    private static readonly Cursor NoCursor = new(StandardCursorType.No);
+    private static readonly Cursor ProgressCursor = new(StandardCursorType.AppStarting);
+    private static readonly Cursor TextCursor = new(StandardCursorType.Ibeam);
+    private static readonly Cursor WaitCursor = new(StandardCursorType.Wait);
+    private static readonly Cursor HelpCursor = new(StandardCursorType.Help);
+    private static readonly Cursor CopyCursor = new(StandardCursorType.DragCopy);
     private const int MaxFormattedTextCacheEntries = 16384;
 
     private Size _consoleTextSize;
@@ -32,6 +53,8 @@ public partial class TerminalControl : Grid
     private Typeface _typeface;
 
     private readonly TerminalSurface _surface;
+
+    private readonly ControlRedrawGate _redrawGate;
 
     private readonly ScrollBar _verticalScrollBar;
 
@@ -62,9 +85,20 @@ public partial class TerminalControl : Grid
     private bool _hasSelection;
 
     private readonly DispatcherTimer _selectionAutoScrollTimer;
+    private readonly DispatcherTimer _imageAnimationTimer;
     private readonly Dictionary<FormattedTextCacheKey, FormattedText> _formattedTextCache = [];
     private readonly Queue<FormattedTextCacheKey> _formattedTextCacheOrder = [];
     private readonly Dictionary<PressedKeyId, PressedKey> _pressedKeys = [];
+    private readonly SixelBitmapCache _sixelBitmaps = new();
+    private readonly TerminalImageBitmapCache _imageBitmaps = new();
+    private TopLevel? _scalingTopLevel;
+    private bool _canRenderSixels = true;
+    private bool _canRenderImages = true;
+    private long _lastImageAnimationTimestamp;
+    private Task _clipboardWriteQueue = Task.CompletedTask;
+    private Task _clipboardReadQueue = Task.CompletedTask;
+    private Cursor? _cursorBeforeTerminalPointerShape;
+    private bool _hasTerminalPointerShape;
 
     // Some backends raise TextInput even for a handled KeyDown, so the text of the last key
     // already sent is held until the next key to keep it from being sent twice.
@@ -82,6 +116,7 @@ public partial class TerminalControl : Grid
         _scrollBarColumn = ColumnDefinitions[1];
 
         _surface = new TerminalSurface(this);
+        _redrawGate = new ControlRedrawGate(_surface, RedrawInterval);
         SetColumn(_surface, 0);
         Children.Add(_surface);
 
@@ -101,6 +136,12 @@ public partial class TerminalControl : Grid
             Interval = SelectionAutoScrollInterval,
         };
         _selectionAutoScrollTimer.Tick += OnSelectionAutoScrollTimerTick;
+
+        _imageAnimationTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(16),
+        };
+        _imageAnimationTimer.Tick += OnImageAnimationTimerTick;
 
         CalculateTextSize();
         UpdateScrollBar();
@@ -124,10 +165,24 @@ public partial class TerminalControl : Grid
 
     public static readonly StyledProperty<double> FontSizeProperty = AvaloniaProperty.Register<TerminalControl, double>(nameof(FontSize), 12);
 
+    /// <summary>Avalonia property for configuring this control's model-driven redraw interval.</summary>
+    public static readonly StyledProperty<TimeSpan> RedrawIntervalProperty = AvaloniaProperty.Register<TerminalControl, TimeSpan>(
+        nameof(RedrawInterval),
+        DefaultRedrawInterval,
+        validate: static value => value >= TimeSpan.Zero);
+
     public double FontSize
     {
         get => GetValue(FontSizeProperty);
         set => SetValue(FontSizeProperty, value);
+    }
+
+    /// <summary>Gets or sets the minimum time between model-driven redraws. Set to zero to remove the interval limit.</summary>
+    /// <exception cref="ArgumentException">The value is negative.</exception>
+    public TimeSpan RedrawInterval
+    {
+        get => GetValue(RedrawIntervalProperty);
+        set => SetValue(RedrawIntervalProperty, value);
     }
 
     public static readonly StyledProperty<IBrush?> CaretBrushProperty = AvaloniaProperty.Register<TerminalControl, IBrush?>(nameof(CaretBrush));
@@ -156,6 +211,18 @@ public partial class TerminalControl : Grid
     }
 
     internal bool CanRenderTextForTests => _canRenderText;
+
+    internal Size ConsoleTextSizeForTests => _consoleTextSize;
+
+    internal int SixelBitmapUploadCountForTests => _sixelBitmaps.UploadCount;
+
+    internal long SixelBitmapBytesForTests => _sixelBitmaps.CachedPixelBytes;
+
+    internal int TerminalImageBitmapUploadCountForTests => _imageBitmaps.UploadCount;
+
+    internal long TerminalImageBitmapBytesForTests => _imageBitmaps.CachedPixelBytes;
+
+    internal bool IsImageAnimationTimerRunningForTests => _imageAnimationTimer.IsEnabled;
 
     public RightClickAction RightClickAction
     {
@@ -197,9 +264,12 @@ public partial class TerminalControl : Grid
     {
         if (!string.IsNullOrEmpty(text))
         {
-            Model?.Send(text);
+            Model?.Terminal.Engine.Paste(text);
         }
     }
+
+    /// <summary>Raised when the running terminal application requests a notification.</summary>
+    public event EventHandler<TerminalNotificationEventArgs>? NotificationRequested;
 
     public async Task CopySelectionAsync()
     {
@@ -223,25 +293,145 @@ public partial class TerminalControl : Grid
 
     public async Task PasteFromClipboardAsync()
     {
-        string? text;
         if (ClipboardTextReaderOverride != null)
         {
-            text = await ClipboardTextReaderOverride().ConfigureAwait(true);
-        }
-        else
-        {
-            var clipboard = ResolveClipboard();
-            if (clipboard == null)
+            string? text = await ClipboardTextReaderOverride().ConfigureAwait(true);
+            if (!string.IsNullOrEmpty(text))
             {
-                return;
+                Paste(text);
             }
-            text = await clipboard.TryGetTextAsync().ConfigureAwait(true);
+
+            return;
         }
 
-        if (!string.IsNullOrEmpty(text))
+        IClipboard? clipboard = ResolveClipboard();
+        if (clipboard is not null && Model is { } model)
         {
-            Paste(text);
+            long maximumClipboardBytes = Math.Max(1, model.Terminal.Engine.Options.MaxClipboardBytes);
+            XTerm.TerminalPaste? paste = await ReadClipboardPasteAsync(clipboard, maximumClipboardBytes).ConfigureAwait(true);
+            if (paste is not null)
+            {
+                model.Terminal.Engine.Paste(paste);
+            }
         }
+    }
+
+    private static async Task<XTerm.TerminalPaste?> ReadClipboardPasteAsync(IClipboard clipboard, long maximumClipboardBytes)
+    {
+        IAsyncDataTransfer? transfer = await clipboard.TryGetDataAsync().ConfigureAwait(true);
+        if (transfer is null)
+        {
+            string? text = await clipboard.TryGetTextAsync().ConfigureAwait(true);
+            return text is null ? null : CreateTextPaste(text);
+        }
+
+        using (transfer)
+        {
+            Dictionary<string, byte[]> formats = new(StringComparer.Ordinal);
+            long totalBytes = 0;
+            IReadOnlyList<IAsyncDataTransferItem> items = transfer.Items;
+            for (int itemIndex = 0; itemIndex < items.Count; itemIndex++)
+            {
+                IAsyncDataTransferItem item = items[itemIndex];
+                IReadOnlyList<DataFormat> itemFormats = item.Formats;
+                for (int formatIndex = 0; formatIndex < itemFormats.Count; formatIndex++)
+                {
+                    DataFormat format = itemFormats[formatIndex];
+                    string? mimeType = GetClipboardMimeType(format);
+                    if (mimeType is null || formats.ContainsKey(mimeType))
+                    {
+                        continue;
+                    }
+
+                    object? value = await item.TryGetRawAsync(format).ConfigureAwait(true);
+                    byte[]? data = GetClipboardBytes(value, mimeType, maximumClipboardBytes - totalBytes);
+                    if (data is not null && data.LongLength <= maximumClipboardBytes - totalBytes)
+                    {
+                        formats.Add(mimeType, data);
+                        totalBytes += data.LongLength;
+                    }
+                }
+            }
+
+            if (!formats.ContainsKey("text/plain") && await clipboard.TryGetTextAsync().ConfigureAwait(true) is { } plainText)
+            {
+                int byteCount = Encoding.UTF8.GetByteCount(plainText);
+                if (byteCount <= maximumClipboardBytes - totalBytes)
+                {
+                    formats.Add("text/plain", Encoding.UTF8.GetBytes(plainText));
+                }
+            }
+
+            if (formats.Count == 0)
+            {
+                return null;
+            }
+
+            string[] mimeTypes = formats.Keys.ToArray();
+            return new XTerm.TerminalPaste(mimeTypes, mimeType => formats.GetValueOrDefault(mimeType));
+        }
+    }
+
+    private static XTerm.TerminalPaste CreateTextPaste(string text)
+    {
+        byte[] data = Encoding.UTF8.GetBytes(text);
+        return new XTerm.TerminalPaste(["text/plain"], _ => data);
+    }
+
+    private static string? GetClipboardMimeType(DataFormat format)
+    {
+        if (format == DataFormat.Text)
+        {
+            return "text/plain";
+        }
+
+        if (format == DataFormat.Bitmap)
+        {
+            return "image/png";
+        }
+
+        if (format.Kind != DataFormatKind.Platform)
+        {
+            return null;
+        }
+
+        return format.Identifier switch
+        {
+            "public.utf8-plain-text" or "text/plain;charset=utf-8" => "text/plain",
+            "public.html" => "text/html",
+            "public.rtf" => "text/rtf",
+            "public.png" => "image/png",
+            _ when format.Identifier.Contains('/', StringComparison.Ordinal) => format.Identifier,
+            _ => null,
+        };
+    }
+
+    private static byte[]? GetClipboardBytes(object? value, string mimeType, long remainingBytes)
+    {
+        if (value is byte[] bytes && bytes.LongLength <= remainingBytes)
+        {
+            return bytes;
+        }
+
+        if (value is string text && Encoding.UTF8.GetByteCount(text) <= remainingBytes)
+        {
+            return Encoding.UTF8.GetBytes(text);
+        }
+
+        if (value is Bitmap bitmap && string.Equals(mimeType, "image/png", StringComparison.Ordinal))
+        {
+            long pixelBytes = (long)bitmap.PixelSize.Width * bitmap.PixelSize.Height * sizeof(uint);
+            if (pixelBytes > remainingBytes)
+            {
+                return null;
+            }
+
+            using MemoryStream stream = new();
+            bitmap.Save(stream, PngBitmapEncoderOptions.Default);
+            return stream.Length <= remainingBytes ? stream.ToArray() : null;
+        }
+
+        return null;
     }
 
     public int Search(string text)
@@ -266,21 +456,45 @@ public partial class TerminalControl : Grid
 
         if (change.Property == ModelProperty)
         {
+            _sixelBitmaps.Clear();
+            _imageBitmaps.Clear();
+            _canRenderSixels = true;
+            _canRenderImages = true;
+            StopImageAnimationTimer();
+
             if (change.OldValue is TerminalControlModel oldModel && oldModel.UpdateUI == RefreshFromModel)
             {
                 oldModel.UpdateUI = null;
             }
 
+            if (change.OldValue is TerminalControlModel oldClipboardModel)
+            {
+                oldClipboardModel.Terminal.Engine.ClipboardWriteRequested -= OnTerminalClipboardWriteRequested;
+                oldClipboardModel.Terminal.Engine.ClipboardReadRequested -= OnTerminalClipboardReadRequested;
+                oldClipboardModel.Terminal.Engine.PointerShapeChanged -= OnTerminalPointerShapeChanged;
+                oldClipboardModel.Terminal.Engine.NotificationReceived -= OnTerminalNotificationReceived;
+                oldClipboardModel.Terminal.Engine.OscReceived -= OnTerminalOscReceived;
+            }
+
+            ClearTerminalPointerShape();
+
             if (change.NewValue is TerminalControlModel newModel)
             {
                 newModel.UpdateUI = RefreshFromModel;
+                newModel.Terminal.Engine.ClipboardWriteRequested += OnTerminalClipboardWriteRequested;
+                newModel.Terminal.Engine.ClipboardReadRequested += OnTerminalClipboardReadRequested;
+                newModel.Terminal.Engine.PointerShapeChanged += OnTerminalPointerShapeChanged;
+                newModel.Terminal.Engine.NotificationReceived += OnTerminalNotificationReceived;
+                newModel.Terminal.Engine.OscReceived += OnTerminalOscReceived;
             }
 
             _pressedKeys.Clear();
             _textOfSentKey = null;
             SyncSelectionStateFromModel();
+            SyncTerminalCellSize();
             UpdateScrollBar();
             ResizeModelToViewport();
+            UpdateImageAnimationTimerState();
             _surface.InvalidateVisual();
         }
 
@@ -291,6 +505,48 @@ public partial class TerminalControl : Grid
             ResizeModelToViewport();
             _surface.InvalidateVisual();
         }
+
+        if (change.Property == RedrawIntervalProperty)
+        {
+            _redrawGate.SetMinimumInterval((TimeSpan)change.NewValue!);
+        }
+    }
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        _scalingTopLevel = TopLevel.GetTopLevel(this);
+        if (_scalingTopLevel is not null)
+        {
+            _scalingTopLevel.ScalingChanged += OnScalingChanged;
+        }
+
+        _canRenderSixels = true;
+            _redrawGate.Resume();
+        RefreshControlStateFromModel();
+        SyncTerminalCellSize();
+        UpdateImageAnimationTimerState();
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        if (_scalingTopLevel is not null)
+        {
+            _scalingTopLevel.ScalingChanged -= OnScalingChanged;
+            _scalingTopLevel = null;
+        }
+
+        _redrawGate.Suspend();
+        StopImageAnimationTimer();
+        _sixelBitmaps.Clear();
+        _imageBitmaps.Clear();
+        base.OnDetachedFromVisualTree(e);
+    }
+
+    private void OnScalingChanged(object? sender, EventArgs e)
+    {
+        SyncTerminalCellSize();
+        ResizeModelToViewport();
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
@@ -602,6 +858,7 @@ public partial class TerminalControl : Grid
     {
         base.OnGotFocus(e);
         _hasFocus = true;
+        SendFocusEvent(isFocused: true);
         _surface.InvalidateVisual();
     }
 
@@ -611,7 +868,238 @@ public partial class TerminalControl : Grid
         _hasFocus = false;
         _textOfSentKey = null;
         ReleasePressedKeys();
+        SendFocusEvent(isFocused: false);
         _surface.InvalidateVisual();
+    }
+
+    private void SendFocusEvent(bool isFocused)
+    {
+        if (Model is not { } model)
+        {
+            return;
+        }
+
+        string input = model.Terminal.Engine.GenerateFocusEvent(isFocused);
+        if (input.Length > 0)
+        {
+            model.Send(input);
+        }
+    }
+
+    private static bool IsClipboardTargetSupported(string target)
+    {
+        return string.Equals(target, "c", StringComparison.Ordinal) ||
+            string.Equals(target, "s", StringComparison.Ordinal);
+    }
+
+    private void OnTerminalPointerShapeChanged(object? sender, XTerm.Events.TerminalEvents.PointerShapeEventArgs e)
+    {
+        string? shape = e.Shape;
+        Dispatcher.UIThread.Post(() => ApplyTerminalPointerShape(shape));
+    }
+
+    private void ApplyTerminalPointerShape(string? shape)
+    {
+        if (shape is null)
+        {
+            ClearTerminalPointerShape();
+            return;
+        }
+
+        Cursor? cursor = GetPointerCursor(shape);
+        if (cursor is null)
+        {
+            return;
+        }
+
+        if (!_hasTerminalPointerShape)
+        {
+            _cursorBeforeTerminalPointerShape = Cursor;
+            _hasTerminalPointerShape = true;
+        }
+
+        SetCurrentValue(CursorProperty, cursor);
+    }
+
+    private void ClearTerminalPointerShape()
+    {
+        if (!_hasTerminalPointerShape)
+        {
+            return;
+        }
+
+        SetCurrentValue(CursorProperty, _cursorBeforeTerminalPointerShape);
+        _cursorBeforeTerminalPointerShape = null;
+        _hasTerminalPointerShape = false;
+    }
+
+    private static Cursor? GetPointerCursor(string shape)
+    {
+        return shape switch
+        {
+            "alias" or "copy" => CopyCursor,
+            "all-scroll" or "move" => AllResizeCursor,
+            "auto" or "default" => Cursor.Default,
+            "cell" or "crosshair" => CrossCursor,
+            "col-resize" or "e-resize" or "ew-resize" or "w-resize" => HorizontalResizeCursor,
+            "context-menu" or "help" => HelpCursor,
+            "grab" or "grabbing" or "pointer" => HandCursor,
+            "n-resize" or "ns-resize" or "row-resize" or "s-resize" => VerticalResizeCursor,
+            "ne-resize" => NorthEastSouthWestResizeCursor,
+            "nw-resize" => NorthWestSouthEastResizeCursor,
+            "se-resize" => SouthEastResizeCursor,
+            "sw-resize" => SouthWestResizeCursor,
+            "no-drop" or "not-allowed" => NoCursor,
+            "progress" => ProgressCursor,
+            "text" or "vertical-text" => TextCursor,
+            "wait" => WaitCursor,
+            _ => null,
+        };
+    }
+
+    private void OnTerminalNotificationReceived(object? sender, XTerm.Events.TerminalEvents.NotificationEventArgs e)
+    {
+        TerminalNotificationEventArgs notification = new(e.Identifier, e.Title, e.Body, e.Urgency, e.Icon);
+        Dispatcher.UIThread.Post(() => NotificationRequested?.Invoke(this, notification));
+    }
+
+    private void OnTerminalOscReceived(object? sender, XTerm.Events.TerminalEvents.OscReceivedEventArgs e)
+    {
+        TerminalControlModel? model = Model;
+        if (model is null || !TerminalFontCoverageService.TryCreateResponse(e, FontFamily, out string response))
+        {
+            return;
+        }
+
+        model.Send(response);
+    }
+
+    private void OnTerminalClipboardWriteRequested(object? sender, XTerm.Events.TerminalEvents.ClipboardWriteEventArgs e)
+    {
+        if (Model?.Terminal.Engine.Options.ClipboardWriteEnabled != true || !IsClipboardTargetSupported(e.Target))
+        {
+            return;
+        }
+
+        string? text = null;
+        for (int i = 0; i < e.Formats.Count; i++)
+        {
+            if (string.Equals(e.Formats[i].MimeType, "text/plain", StringComparison.Ordinal))
+            {
+                text = Encoding.UTF8.GetString(e.Formats[i].Data);
+                break;
+            }
+        }
+
+        if (text is null)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() => QueueClipboardWrite(text));
+    }
+
+    private void QueueClipboardWrite(string text)
+    {
+        _clipboardWriteQueue = _clipboardWriteQueue.ContinueWith(
+            _ => WriteClipboardTextAsync(text),
+            CancellationToken.None,
+            TaskContinuationOptions.None,
+            TaskScheduler.FromCurrentSynchronizationContext()).Unwrap();
+    }
+
+    private async Task WriteClipboardTextAsync(string text)
+    {
+        try
+        {
+            if (ClipboardTextWriterOverride is { } writer)
+            {
+                await writer(text).ConfigureAwait(true);
+                return;
+            }
+
+            IClipboard? clipboard = ResolveClipboard();
+            if (clipboard is null)
+            {
+                return;
+            }
+
+            if (text.Length == 0)
+            {
+                await clipboard.ClearAsync().ConfigureAwait(true);
+            }
+            else
+            {
+                await clipboard.SetTextAsync(text).ConfigureAwait(true);
+            }
+        }
+        catch (Exception exception) when (IsExpectedClipboardFailure(exception))
+        {
+            // The terminal protocol has no error response for a failed host clipboard write.
+        }
+    }
+
+    private void OnTerminalClipboardReadRequested(object? sender, XTerm.Events.TerminalEvents.ClipboardReadEventArgs e)
+    {
+        if (Model?.Terminal.Engine.Options.ClipboardReadEnabled != true || !IsClipboardTargetSupported(e.Target))
+        {
+            return;
+        }
+
+        if (string.Equals(e.MimeType, ".", StringComparison.Ordinal))
+        {
+            e.Text = "text/plain";
+            return;
+        }
+
+        if (e.MimeType.Length > 0 && !string.Equals(e.MimeType, "text/plain", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        e.Defer();
+        Dispatcher.UIThread.Post(() => QueueClipboardRead(e));
+    }
+
+    private void QueueClipboardRead(XTerm.Events.TerminalEvents.ClipboardReadEventArgs request)
+    {
+        _clipboardReadQueue = _clipboardReadQueue.ContinueWith(
+            _ => RespondToClipboardReadAsync(request),
+            CancellationToken.None,
+            TaskContinuationOptions.None,
+            TaskScheduler.FromCurrentSynchronizationContext()).Unwrap();
+    }
+
+    private async Task RespondToClipboardReadAsync(XTerm.Events.TerminalEvents.ClipboardReadEventArgs request)
+    {
+        string? text = null;
+        try
+        {
+            if (ClipboardTextReaderOverride is { } reader)
+            {
+                text = await reader().ConfigureAwait(true);
+            }
+            else if (ResolveClipboard() is { } clipboard)
+            {
+                text = await clipboard.TryGetTextAsync().ConfigureAwait(true);
+            }
+        }
+        catch (Exception exception) when (IsExpectedClipboardFailure(exception))
+        {
+            // An unavailable or locked clipboard is answered as an empty read.
+        }
+
+        request.Respond(text);
+    }
+
+    private static bool IsExpectedClipboardFailure(Exception exception)
+    {
+        return exception is InvalidOperationException or
+            NotSupportedException or
+            IOException or
+            UnauthorizedAccessException or
+            OperationCanceledException or
+            System.Runtime.InteropServices.ExternalException;
     }
 
     public static Brush ConvertXtermColor(int xtermColor)
@@ -745,18 +1233,37 @@ public partial class TerminalControl : Grid
         if (TryCalculateTextMetrics(FontFamily, FontSize, out _typeface, out _consoleTextSize))
         {
             _canRenderText = true;
+            SyncTerminalCellSize();
             return;
         }
 
         if (TryCalculateTextMetrics(Avalonia.Media.FontFamily.Default, FontSize, out _typeface, out _consoleTextSize))
         {
             _canRenderText = true;
+            SyncTerminalCellSize();
             return;
         }
 
         _typeface = new Typeface(Avalonia.Media.FontFamily.Default);
         _consoleTextSize = new Size(Math.Max(FontSize * 0.6, 1), Math.Max(FontSize * 1.4, 1));
         _canRenderText = true;
+        SyncTerminalCellSize();
+    }
+
+    private void SyncTerminalCellSize()
+    {
+        if (Model is null || _consoleTextSize.Width <= 0 || _consoleTextSize.Height <= 0)
+        {
+            return;
+        }
+
+        var scaling = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1;
+        var width = Math.Max((int)Math.Round(_consoleTextSize.Width * scaling), 1);
+        var height = Math.Max((int)Math.Round(_consoleTextSize.Height * scaling), 1);
+        if (Model.Terminal.Options.CellWidthPixels != width || Model.Terminal.Options.CellHeightPixels != height)
+        {
+            Model.Terminal.SetCellSizePixels(width, height);
+        }
     }
 
     private static bool TryCalculateTextMetrics(Avalonia.Media.FontFamily fontFamily, double fontSize, out Typeface typeface, out Size size)
@@ -784,9 +1291,61 @@ public partial class TerminalControl : Grid
 
     private void RefreshFromModel()
     {
+        _redrawGate.Request(RefreshControlStateFromModel);
+    }
+
+    private void RefreshControlStateFromModel()
+    {
         SyncSelectionStateFromModel();
         UpdateScrollBar();
-        _surface.InvalidateVisual();
+        UpdateImageAnimationTimerState();
+    }
+
+    private void UpdateImageAnimationTimerState()
+    {
+        bool shouldRun = VisualRoot is not null && (Model?.Terminal.Engine.HasRunningAnimations() ?? false);
+        if (shouldRun == _imageAnimationTimer.IsEnabled)
+        {
+            return;
+        }
+
+        if (shouldRun)
+        {
+            _lastImageAnimationTimestamp = Stopwatch.GetTimestamp();
+            _imageAnimationTimer.Start();
+        }
+        else
+        {
+            StopImageAnimationTimer();
+        }
+    }
+
+    private void StopImageAnimationTimer()
+    {
+        if (_imageAnimationTimer.IsEnabled)
+        {
+            _imageAnimationTimer.Stop();
+        }
+    }
+
+    private void OnImageAnimationTimerTick(object? sender, EventArgs e)
+    {
+        if (Model is not { } model)
+        {
+            StopImageAnimationTimer();
+            return;
+        }
+
+        long now = Stopwatch.GetTimestamp();
+        TimeSpan elapsed = Stopwatch.GetElapsedTime(_lastImageAnimationTimestamp, now);
+        _lastImageAnimationTimestamp = now;
+
+        if (model.Terminal.Engine.AdvanceAnimations(elapsed))
+        {
+            _redrawGate.Request();
+        }
+
+        UpdateImageAnimationTimerState();
     }
 
     internal bool IsCaretFocused => _hasFocus;
@@ -945,7 +1504,7 @@ public partial class TerminalControl : Grid
 
         SendMouseSequence(
             ToMouseButton(button),
-            XMouseEventType.Down,
+            MouseEventType.Down,
             col,
             row,
             e.KeyModifiers);
@@ -963,7 +1522,7 @@ public partial class TerminalControl : Grid
         var props = e.GetCurrentPoint(_surface).Properties;
         var hasPressedButton = props.IsLeftButtonPressed || props.IsMiddleButtonPressed || props.IsRightButtonPressed;
 
-        var shouldSendMotion = mode == XMouseTrackingMode.AnyEvent || (mode == XMouseTrackingMode.ButtonEvent && hasPressedButton);
+        var shouldSendMotion = mode == MouseTrackingMode.AnyEvent || (mode == MouseTrackingMode.ButtonEvent && hasPressedButton);
         if (!shouldSendMotion)
         {
             return false;
@@ -977,7 +1536,7 @@ public partial class TerminalControl : Grid
         var button = hasPressedButton ? GetPressedButton(props) : _activeTerminalMouseButton;
         SendMouseSequence(
             ToMouseButton(button),
-            XMouseEventType.Drag,
+            MouseEventType.Drag,
             col,
             row,
             e.KeyModifiers);
@@ -1009,21 +1568,21 @@ public partial class TerminalControl : Grid
         _activeTerminalMouseButton = 0;
         SendMouseSequence(
             ToMouseButton(button),
-            XMouseEventType.Up,
+            MouseEventType.Up,
             col,
             row,
             e.KeyModifiers);
         return true;
     }
 
-    private static bool ShouldSendTerminalMousePress(XMouseTrackingMode mode)
+    private static bool ShouldSendTerminalMousePress(MouseTrackingMode mode)
     {
-        return mode == XMouseTrackingMode.X10 || mode == XMouseTrackingMode.VT200 || mode == XMouseTrackingMode.ButtonEvent || mode == XMouseTrackingMode.AnyEvent;
+        return mode == MouseTrackingMode.X10 || mode == MouseTrackingMode.VT200 || mode == MouseTrackingMode.ButtonEvent || mode == MouseTrackingMode.AnyEvent;
     }
 
-    private static bool ShouldSendTerminalMouseRelease(XMouseTrackingMode mode)
+    private static bool ShouldSendTerminalMouseRelease(MouseTrackingMode mode)
     {
-        return mode == XMouseTrackingMode.VT200 || mode == XMouseTrackingMode.ButtonEvent || mode == XMouseTrackingMode.AnyEvent;
+        return mode == MouseTrackingMode.VT200 || mode == MouseTrackingMode.ButtonEvent || mode == MouseTrackingMode.AnyEvent;
     }
 
     private static int GetPointerButton(PointerEventArgs e)
@@ -1307,14 +1866,14 @@ public partial class TerminalControl : Grid
             var button = delta.Y > 0 ? 4 : 5;
             SendMouseSequence(
                 button == 4 ? XMouseButton.WheelUp : XMouseButton.WheelDown,
-                button == 4 ? XMouseEventType.WheelUp : XMouseEventType.WheelDown,
+                button == 4 ? MouseEventType.WheelUp : MouseEventType.WheelDown,
                 col,
                 row,
                 KeyModifiers.None);
         }
     }
 
-    private void SendMouseSequence(XMouseButton button, XMouseEventType eventType, int col, int row, AvaloniaModifiers modifiers)
+    private void SendMouseSequence(XMouseButton button, MouseEventType eventType, int col, int row, KeyModifiers modifiers)
     {
         if (Model == null)
         {
@@ -1370,7 +1929,7 @@ public partial class TerminalControl : Grid
         }
         else
         {
-            if (e.KeyModifiers.HasFlag(AvaloniaModifiers.Meta) || ScrollsViewport(e))
+            if (e.KeyModifiers.HasFlag(KeyModifiers.Meta) || ScrollsViewport(e))
             {
                 _pressedKeys.Remove(keyId);
                 return false;
@@ -1410,7 +1969,7 @@ public partial class TerminalControl : Grid
 
         foreach (var pressed in pressedKeys)
         {
-            var keyEvent = new EngineKeyEvent { Key = pressed.Key, Code = pressed.Code };
+            var keyEvent = new KeyEvent { Key = pressed.Key, Code = pressed.Code };
             var sequence = model.Terminal.Engine.GenerateKittyKeyInput(keyEvent, KittyKeyboardEventType.Release);
             if (!string.IsNullOrEmpty(sequence))
             {
@@ -1421,10 +1980,10 @@ public partial class TerminalControl : Grid
 
     private bool ScrollsViewport(KeyEventArgs e)
     {
-        const AvaloniaModifiers sentToTheApplication = AvaloniaModifiers.Control | AvaloniaModifiers.Alt;
+        const KeyModifiers sentToTheApplication = KeyModifiers.Control | KeyModifiers.Alt;
 
         return e.Key is Key.PageUp or Key.PageDown
-            && (e.KeyModifiers & sentToTheApplication) == AvaloniaModifiers.None
+            && (e.KeyModifiers & sentToTheApplication) == KeyModifiers.None
             && Model?.Terminal.Engine.ApplicationCursorKeys == false;
     }
 
@@ -1432,21 +1991,21 @@ public partial class TerminalControl : Grid
     // dead-key characters arrive, so a key that only types is not sent from here as well.
     private static bool IsLeftToTextInput(KeyEventArgs e, string sequence)
     {
-        const AvaloniaModifiers sentFromKeyDown = AvaloniaModifiers.Control | AvaloniaModifiers.Alt;
+        const KeyModifiers sentFromKeyDown = KeyModifiers.Control | KeyModifiers.Alt;
 
-        return (e.KeyModifiers & sentFromKeyDown) == AvaloniaModifiers.None
+        return (e.KeyModifiers & sentFromKeyDown) == KeyModifiers.None
             && sequence.Length == 1
             && !char.IsControl(sequence[0]);
     }
 
-    private bool TrySendGeneratedKey(Key key, AvaloniaModifiers modifiers)
+    private bool TrySendGeneratedKey(Key key, KeyModifiers modifiers)
     {
         if (Model == null || !TryMapKey(key, out var mappedKey, out var extraModifiers))
         {
             return false;
         }
 
-        var filteredModifiers = modifiers & (AvaloniaModifiers.Shift | AvaloniaModifiers.Alt | AvaloniaModifiers.Control);
+        var filteredModifiers = modifiers & (KeyModifiers.Shift | KeyModifiers.Alt | KeyModifiers.Control);
         SendGeneratedKey(mappedKey, extraModifiers | ToXTermModifiers(filteredModifiers));
         return true;
     }
@@ -1589,21 +2148,21 @@ public partial class TerminalControl : Grid
         }
     }
 
-    private static XTermModifiers ToXTermModifiers(AvaloniaModifiers modifiers)
+    private static XTermModifiers ToXTermModifiers(KeyModifiers modifiers)
     {
         XTermModifiers result = XTermModifiers.None;
 
-        if (modifiers.HasFlag(AvaloniaModifiers.Shift))
+        if (modifiers.HasFlag(KeyModifiers.Shift))
         {
             result |= XTermModifiers.Shift;
         }
 
-        if (modifiers.HasFlag(AvaloniaModifiers.Alt))
+        if (modifiers.HasFlag(KeyModifiers.Alt))
         {
             result |= XTermModifiers.Alt;
         }
 
-        if (modifiers.HasFlag(AvaloniaModifiers.Control))
+        if (modifiers.HasFlag(KeyModifiers.Control))
         {
             result |= XTermModifiers.Control;
         }
@@ -1634,6 +2193,10 @@ public partial class TerminalControl : Grid
 
     private sealed class TerminalSurface(TerminalControl owner) : Control
     {
+        [System.Diagnostics.CodeAnalysis.SuppressMessage(
+            "Reliability",
+            "CA2000:Dispose objects before losing scope",
+            Justification = "The graphics bitmap caches own and dispose their bitmaps when content changes or leaves the viewport.")]
         public override void Render(DrawingContext context)
         {
             var rect = new Rect(0, 0, Bounds.Width, Bounds.Height);
@@ -1641,59 +2204,421 @@ public partial class TerminalControl : Grid
 
             if (owner.Model == null)
             {
+                owner._sixelBitmaps.Clear();
+                owner._imageBitmaps.Clear();
                 return;
             }
 
-            foreach (var row in owner.Model.ViewportRows)
+            owner.SyncTerminalCellSize();
+            owner._sixelBitmaps.BeginFrame();
+            owner._imageBitmaps.BeginFrame();
+            try
             {
-                foreach (var run in row.Runs)
+                foreach (var row in owner.Model.ViewportRows)
                 {
-                    var runRect = new Rect(
-                        owner._consoleTextSize.Width * run.StartColumn,
-                        owner._consoleTextSize.Height * row.RowIndex,
-                        owner._consoleTextSize.Width * run.CellWidth,
-                        owner._consoleTextSize.Height + 1);
-                    context.FillRectangle(owner.ResolveColorBrush(run.BackgroundColor), runRect);
-
-                    if (owner._canRenderText)
+                    foreach (var run in row.Runs)
                     {
+                        DrawRunBackground(context, row, run);
+                    }
+                }
+
+                DrawSizedTextBlocks(context, owner.Model.ViewportRows, drawBackground: true);
+                DrawOffscreenSizedTextBlocks(context, drawBackground: true);
+
+                DrawKittyImages(context, rect, owner.Model.ViewportRows, drawBehindText: true);
+
+                foreach (var row in owner.Model.ViewportRows)
+                {
+                    foreach (var run in row.Runs)
+                    {
+                        if (!owner._canRenderText || run.Invisible || !run.Sizing.IsDefault)
+                        {
+                            continue;
+                        }
+
                         var formattedText = owner.GetOrCreateFormattedText(run);
-                        context.DrawText(formattedText, new Point(owner._consoleTextSize.Width * run.StartColumn, owner._consoleTextSize.Height * row.RowIndex));
+                        context.DrawText(formattedText, new Point(
+                            owner._consoleTextSize.Width * run.StartColumn,
+                            owner._consoleTextSize.Height * row.RowIndex));
+                        owner.DrawTerminalDecorations(context, run, row.RowIndex);
+                    }
+                }
+
+                DrawSizedTextBlocks(context, owner.Model.ViewportRows, drawBackground: false);
+                DrawOffscreenSizedTextBlocks(context, drawBackground: false);
+
+                if (owner._canRenderSixels)
+                {
+                    using (context.PushClip(rect))
+                    {
+                        foreach (var row in owner.Model.ViewportRows)
+                        {
+                            if (row.Sixel is not { } strip ||
+                                !SixelDrawPlan.TryCreate(
+                                    strip,
+                                    row.SixelColumns,
+                                    row.RowIndex,
+                                    owner._consoleTextSize.Width,
+                                    owner._consoleTextSize.Height,
+                                    owner._scalingTopLevel?.RenderScaling ?? 1,
+                                    rect,
+                                    out var source,
+                                    out var destination))
+                            {
+                                continue;
+                            }
+
+                            var bitmap = owner._sixelBitmaps.GetOrCreate(strip, row.SixelColumns);
+                            if (bitmap is null)
+                            {
+                                continue;
+                            }
+
+                            try
+                            {
+                                context.DrawImage(bitmap, source, destination);
+                            }
+                            catch (Exception exception) when (exception is NotImplementedException or NotSupportedException)
+                            {
+                                owner._canRenderSixels = false;
+                                owner._sixelBitmaps.Clear();
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                DrawKittyImages(context, rect, owner.Model.ViewportRows, drawBehindText: false);
+
+                if (owner.Model.HasSelection)
+                {
+                    foreach (var selectionRect in owner.GetSelectionRects())
+                    {
+                        context.FillRectangle(owner.ResolveSelectionBrush(), selectionRect);
+                    }
+                }
+
+                if (!owner.TryGetCaretRect(out var caretRect))
+                {
+                    return;
+                }
+
+                var caretBrush = owner.ResolveCaretBrush();
+                if (owner._hasFocus)
+                {
+                    var fillRect = new Rect(
+                        caretRect.X - 1,
+                        caretRect.Y,
+                        caretRect.Width + 2,
+                        caretRect.Height);
+                    context.FillRectangle(caretBrush, fillRect);
+                }
+                else
+                {
+                    var strokeRect = new Rect(
+                        caretRect.X + 1,
+                        caretRect.Y + 1,
+                        Math.Max(caretRect.Width - 2, 1),
+                        Math.Max(caretRect.Height - 2, 1));
+                    context.DrawRectangle(null, new Pen(caretBrush, 1), strokeRect);
+                }
+            }
+            finally
+            {
+                owner._sixelBitmaps.EndFrame();
+                owner._imageBitmaps.EndFrame();
+            }
+        }
+
+        private void DrawRunBackground(DrawingContext context, ViewportRow row, ViewportTextRun run)
+        {
+            if (!run.Sizing.IsDefault)
+            {
+                return;
+            }
+
+            int start = run.StartColumn;
+            int end = start + run.CellWidth;
+            bool hasOverlappingBehindImage = false;
+            for (int index = 0; index < row.BehindImageCount; index++)
+            {
+                ViewportImagePlacement image = row.Images[index];
+                if (image.Placement.ZIndex < 0 && image.Placement.Column < end && image.Placement.EndColumn > start)
+                {
+                    hasOverlappingBehindImage = true;
+                    break;
+                }
+            }
+
+            if (!hasOverlappingBehindImage)
+            {
+                FillBackground(context, row, run, start, run.CellWidth);
+                return;
+            }
+
+            int segmentStart = start;
+
+            for (int column = start; column < end; column++)
+            {
+                if (!HasBehindImageAt(row, column))
+                {
+                    continue;
+                }
+
+                if (segmentStart < column)
+                {
+                    FillBackground(context, row, run, segmentStart, column - segmentStart);
+                }
+
+                segmentStart = column + 1;
+            }
+
+            if (segmentStart < end)
+            {
+                FillBackground(context, row, run, segmentStart, end - segmentStart);
+            }
+        }
+
+        private void DrawSizedTextBlocks(
+            DrawingContext context,
+            IReadOnlyList<ViewportRow> rows,
+            bool drawBackground)
+        {
+            foreach (ViewportRow row in rows)
+            {
+                foreach (ViewportTextRun run in row.Runs)
+                {
+                    if (run.Sizing.IsDefault)
+                    {
+                        continue;
+                    }
+
+                    if (drawBackground)
+                    {
+                        DrawSizedTextBackground(context, run, row.RowIndex);
+                    }
+                    else
+                    {
+                        DrawSizedText(context, run, row.RowIndex);
                     }
                 }
             }
+        }
 
-            if (owner.Model.HasSelection)
-            {
-                foreach (var selectionRect in owner.GetSelectionRects())
-                {
-                    context.FillRectangle(owner.ResolveSelectionBrush(), selectionRect);
-                }
-            }
-
-            if (!owner.TryGetCaretRect(out var caretRect))
+        private void DrawOffscreenSizedTextBlocks(DrawingContext context, bool drawBackground)
+        {
+            TerminalControlModel? model = owner.Model;
+            if (model is null)
             {
                 return;
             }
 
-            var caretBrush = owner.ResolveCaretBrush();
-            if (owner._hasFocus)
+            TerminalBuffer buffer = model.Terminal.Buffer;
+            if (!buffer.HasMultiRowSizedRuns)
             {
-                var fillRect = new Rect(
-                    caretRect.X - 1,
-                    caretRect.Y,
-                    caretRect.Width + 2,
-                    caretRect.Height);
-                context.FillRectangle(caretBrush, fillRect);
+                return;
             }
-            else
+
+            int viewportStart = buffer.YDisp;
+            for (int rowsAbove = 1; rowsAbove < TextSizing.MaxScale; rowsAbove++)
             {
-                var strokeRect = new Rect(
-                    caretRect.X + 1,
-                    caretRect.Y + 1,
-                    Math.Max(caretRect.Width - 2, 1),
-                    Math.Max(caretRect.Height - 2, 1));
-                context.DrawRectangle(null, new Pen(caretBrush, 1), strokeRect);
+                int anchorRow = viewportStart - rowsAbove;
+                if (anchorRow < 0)
+                {
+                    break;
+                }
+
+                BufferLine? line = anchorRow < buffer.Lines.Length ? buffer.GetLine(anchorRow) : null;
+                if (line is null || !line.HasSizedRuns)
+                {
+                    continue;
+                }
+
+                foreach (LineSizedRun sizedRun in line.SizedRuns)
+                {
+                    if (sizedRun.Rows <= rowsAbove ||
+                        !TerminalControlModel.TryCreateSizedTextRun(line, sizedRun, model.Terminal.Cols, out ViewportTextRun run))
+                    {
+                        continue;
+                    }
+
+                    int rowIndex = -rowsAbove;
+                    if (drawBackground)
+                    {
+                        DrawSizedTextBackground(context, run, rowIndex);
+                    }
+                    else
+                    {
+                        DrawSizedText(context, run, rowIndex);
+                    }
+                }
+            }
+        }
+
+        private void DrawSizedTextBackground(DrawingContext context, ViewportTextRun run, int rowIndex)
+        {
+            Rect box = GetSizedTextBlockBox(run, rowIndex);
+            if (box.Width > 0 && box.Height > 0)
+            {
+                context.FillRectangle(owner.ResolveColorBrush(run.BackgroundColor), box);
+            }
+        }
+
+        private void DrawSizedText(DrawingContext context, ViewportTextRun run, int rowIndex)
+        {
+            if (!owner._canRenderText || run.Invisible || string.IsNullOrWhiteSpace(run.Text))
+            {
+                return;
+            }
+
+            TextSizing sizing = run.Sizing;
+            double fraction = sizing.Numerator > 0 && sizing.Denominator > 0
+                ? (double)sizing.Numerator / sizing.Denominator
+                : 1;
+            double magnification = sizing.Scale * fraction;
+            if (magnification <= 0)
+            {
+                return;
+            }
+
+            FormattedText formattedText = owner.GetOrCreateFormattedText(run);
+            Rect box = GetSizedTextBlockBox(run, rowIndex);
+            if (box.Width <= 0 || box.Height <= 0)
+            {
+                return;
+            }
+
+            double drawnWidth = formattedText.Width * magnification;
+            double drawnHeight = owner._consoleTextSize.Height * magnification;
+            double x = sizing.HorizontalAlignment switch
+            {
+                TextSizeHorizontalAlignment.Right => box.Right - drawnWidth,
+                TextSizeHorizontalAlignment.Center => box.X + (box.Width - drawnWidth) / 2,
+                _ => box.X,
+            };
+            double y = sizing.VerticalAlignment switch
+            {
+                TextSizeVerticalAlignment.Bottom => box.Bottom - drawnHeight,
+                TextSizeVerticalAlignment.Center => box.Y + (box.Height - drawnHeight) / 2,
+                _ => box.Y,
+            };
+
+            using (context.PushClip(box))
+            {
+                Matrix transform = Matrix.CreateTranslation(-x, -y) *
+                    Matrix.CreateScale(magnification, magnification) *
+                    Matrix.CreateTranslation(x, y);
+                using (context.PushTransform(transform))
+                {
+                    context.DrawText(formattedText, new Point(x, y));
+                    owner.DrawTerminalDecorations(context, run, rowIndex);
+                }
+            }
+        }
+
+        private Rect GetSizedTextBlockBox(ViewportTextRun run, int rowIndex)
+        {
+            return new Rect(
+                owner._consoleTextSize.Width * run.StartColumn,
+                owner._consoleTextSize.Height * rowIndex,
+                owner._consoleTextSize.Width * run.CellWidth,
+                owner._consoleTextSize.Height * run.Sizing.Scale);
+        }
+
+        private static bool HasBehindImageAt(ViewportRow row, int column)
+        {
+            for (int index = 0; index < row.BehindImageCount; index++)
+            {
+                if (row.Images[index].Placement.Covers(column))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void FillBackground(DrawingContext context, ViewportRow row, ViewportTextRun run, int startColumn, int columns)
+        {
+            var runRect = new Rect(
+                owner._consoleTextSize.Width * startColumn,
+                owner._consoleTextSize.Height * row.RowIndex,
+                owner._consoleTextSize.Width * columns,
+                owner._consoleTextSize.Height + 1);
+            context.FillRectangle(owner.ResolveColorBrush(run.BackgroundColor), runRect);
+        }
+
+        [System.Diagnostics.CodeAnalysis.SuppressMessage(
+            "Reliability",
+            "CA2000:Dispose objects before losing scope",
+            Justification = "The image bitmap cache retains and disposes each returned bitmap after it leaves the viewport.")]
+        private void DrawKittyImages(
+            DrawingContext context,
+            Rect viewport,
+            IReadOnlyList<ViewportRow> rows,
+            bool drawBehindText)
+        {
+            if (!owner._canRenderImages)
+            {
+                return;
+            }
+
+            bool hasDraws = false;
+            foreach (ViewportRow row in rows)
+            {
+                if (drawBehindText ? row.BehindImageCount > 0 : row.Images.Count > row.BehindImageCount)
+                {
+                    hasDraws = true;
+                    break;
+                }
+            }
+
+            if (!hasDraws)
+            {
+                return;
+            }
+
+            using (context.PushClip(viewport))
+            {
+                foreach (ViewportRow row in rows)
+                {
+                    int start = drawBehindText ? 0 : row.BehindImageCount;
+                    int end = drawBehindText ? row.BehindImageCount : row.Images.Count;
+                    for (int index = start; index < end; index++)
+                    {
+                        ViewportImagePlacement image = row.Images[index];
+                        if (!TerminalImageDrawPlan.TryCreate(
+                                image.Image,
+                                image.Placement,
+                                row.RowIndex,
+                                owner._consoleTextSize.Width,
+                                owner._consoleTextSize.Height,
+                                owner._scalingTopLevel?.RenderScaling ?? 1,
+                                viewport,
+                                out Rect source,
+                                out Rect destination))
+                        {
+                            continue;
+                        }
+
+                        Bitmap? bitmap = owner._imageBitmaps.GetOrCreate(image.Image);
+                        if (bitmap is null)
+                        {
+                            continue;
+                        }
+
+                        try
+                        {
+                            context.DrawImage(bitmap, source, destination);
+                        }
+                        catch (Exception exception) when (exception is NotImplementedException or NotSupportedException)
+                        {
+                            owner._canRenderImages = false;
+                            owner._imageBitmaps.Clear();
+                            return;
+                        }
+                    }
+                }
             }
         }
 
@@ -1861,6 +2786,19 @@ public partial class TerminalControl : Grid
 
     private Brush ResolveColorBrush(int color)
     {
+        return ResolveColorBrush(color, isRgb: false);
+    }
+
+    private Brush ResolveColorBrush(int color, bool isRgb)
+    {
+        if (isRgb)
+        {
+            byte redComponent = (byte)((color >> 16) & 0xFF);
+            byte greenComponent = (byte)((color >> 8) & 0xFF);
+            byte blueComponent = (byte)(color & 0xFF);
+            return new SolidColorBrush(Color.FromRgb(redComponent, greenComponent, blueComponent));
+        }
+
         if (color == 256)
         {
             return ResolvePaletteBrush(15);
@@ -1887,9 +2825,16 @@ public partial class TerminalControl : Grid
         var cacheKey = new FormattedTextCacheKey(
             run.Text,
             run.ForegroundColor,
+            run.BackgroundColor,
             run.FontWeight,
             run.FontStyle,
-            GetTextDecorationFlags(run.TextDecorations));
+            run.UnderlineStyle,
+            run.UnderlineColor,
+            run.UnderlineColorIsRgb,
+            run.Overline,
+            run.Dim,
+            run.Invisible,
+            run.Strikethrough);
 
         if (_formattedTextCache.TryGetValue(cacheKey, out var cached))
         {
@@ -1898,11 +2843,12 @@ public partial class TerminalControl : Grid
 
         EvictFormattedTextCacheEntriesIfNeeded();
 
-        var foregroundBrush = ResolveColorBrush(run.ForegroundColor);
+        var foregroundBrush = ResolveTextBrush(run);
         var formattedText = new FormattedText(run.Text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, _typeface, FontSize, foregroundBrush);
-        if (run.TextDecorations != null)
+        TextDecorationCollection? decorations = CreateTextDecorations(run);
+        if (decorations is not null)
         {
-            formattedText.SetTextDecorations(run.TextDecorations);
+            formattedText.SetTextDecorations(decorations);
         }
 
         formattedText.SetFontWeight(run.FontWeight);
@@ -1910,6 +2856,125 @@ public partial class TerminalControl : Grid
         _formattedTextCache[cacheKey] = formattedText;
         _formattedTextCacheOrder.Enqueue(cacheKey);
         return formattedText;
+    }
+
+    private IBrush ResolveTextBrush(ViewportTextRun run)
+    {
+        if (run.Invisible)
+        {
+            return ResolveColorBrush(run.BackgroundColor);
+        }
+
+        IBrush brush = ResolveColorBrush(run.ForegroundColor);
+        if (!run.Dim)
+        {
+            return brush;
+        }
+
+        if (brush is ISolidColorBrush solid)
+        {
+            return new SolidColorBrush(solid.Color, solid.Opacity * 0.5);
+        }
+
+        return brush;
+    }
+
+    private static TextDecorationCollection? CreateTextDecorations(ViewportTextRun run)
+    {
+        TextDecorationCollection? decorations = null;
+        if (run.Strikethrough)
+        {
+            decorations = new TextDecorationCollection(TextDecorations.Strikethrough);
+        }
+
+        return decorations;
+    }
+
+    private void DrawTerminalDecorations(DrawingContext context, ViewportTextRun run, int rowIndex)
+    {
+        if (run.Invisible || run.CellWidth <= 0 || (!run.Overline && run.UnderlineStyle == UnderlineStyle.None))
+        {
+            return;
+        }
+
+        double width = _consoleTextSize.Width * run.CellWidth;
+        if (width <= 0)
+        {
+            return;
+        }
+
+        double x = _consoleTextSize.Width * run.StartColumn;
+        double right = x + width;
+        double top = _consoleTextSize.Height * rowIndex;
+        double bottom = top + _consoleTextSize.Height;
+        double thickness = Math.Max(1, _consoleTextSize.Height / 16);
+        IBrush underlineBrush = run.UnderlineColor >= 0
+            ? ResolveColorBrush(run.UnderlineColor, run.UnderlineColorIsRgb)
+            : ResolveColorBrush(run.ForegroundColor);
+
+        if (run.Overline)
+        {
+            IBrush overlineBrush = ResolveColorBrush(run.ForegroundColor);
+            context.DrawLine(new Pen(overlineBrush, thickness), new Point(x, top + thickness), new Point(right, top + thickness));
+        }
+
+        double underlineY = bottom - Math.Max(1, _consoleTextSize.Height * 0.1);
+        Pen underlinePen = new(underlineBrush, thickness);
+        switch (run.UnderlineStyle)
+        {
+            case UnderlineStyle.Single:
+                context.DrawLine(underlinePen, new Point(x, underlineY), new Point(right, underlineY));
+                break;
+            case UnderlineStyle.Double:
+                context.DrawLine(underlinePen, new Point(x, underlineY - thickness * 1.5), new Point(right, underlineY - thickness * 1.5));
+                context.DrawLine(underlinePen, new Point(x, underlineY), new Point(right, underlineY));
+                break;
+            case UnderlineStyle.Dotted:
+                DrawDashedLine(context, underlineBrush, thickness, x, right, underlineY, dashLength: thickness, gapLength: thickness * 2);
+                break;
+            case UnderlineStyle.Dashed:
+                DrawDashedLine(context, underlineBrush, thickness, x, right, underlineY, dashLength: thickness * 3, gapLength: thickness * 2);
+                break;
+            case UnderlineStyle.Curly:
+                DrawCurlyLine(context, underlinePen, x, right, underlineY, Math.Max(0.75, _consoleTextSize.Height * 0.045));
+                break;
+        }
+    }
+
+    private static void DrawDashedLine(
+        DrawingContext context,
+        IBrush brush,
+        double thickness,
+        double x,
+        double right,
+        double y,
+        double dashLength,
+        double gapLength)
+    {
+        Pen pen = new(brush, thickness, lineCap: PenLineCap.Round);
+        for (double start = x; start < right; start += dashLength + gapLength)
+        {
+            context.DrawLine(pen, new Point(start, y), new Point(Math.Min(start + dashLength, right), y));
+        }
+    }
+
+    private static void DrawCurlyLine(DrawingContext context, Pen pen, double x, double right, double y, double amplitude)
+    {
+        const double step = 1.5;
+        StreamGeometry geometry = new();
+        using (StreamGeometryContext geometryContext = geometry.Open())
+        {
+            geometryContext.BeginFigure(new Point(x, y), isFilled: false);
+            int pointCount = Math.Max(2, (int)Math.Ceiling((right - x) / step));
+            for (int point = 1; point <= pointCount; point++)
+            {
+                double position = Math.Min(point * step, right - x);
+                double offset = Math.Sin(position * Math.PI / 3) * amplitude;
+                geometryContext.LineTo(new Point(x + position, y + offset), isStroked: true);
+            }
+        }
+
+        context.DrawGeometry(null, pen, geometry);
     }
 
     private void EvictFormattedTextCacheEntriesIfNeeded()
@@ -1925,29 +2990,6 @@ public partial class TerminalControl : Grid
     {
         _formattedTextCache.Clear();
         _formattedTextCacheOrder.Clear();
-    }
-
-    private static TextDecorationFlags GetTextDecorationFlags(TextDecorationCollection? decorations)
-    {
-        if (decorations is null || decorations.Count == 0)
-        {
-            return TextDecorationFlags.None;
-        }
-
-        TextDecorationFlags flags = TextDecorationFlags.None;
-        foreach (var decoration in decorations)
-        {
-            flags |= decoration.Location switch
-            {
-                TextDecorationLocation.Underline => TextDecorationFlags.Underline,
-                TextDecorationLocation.Strikethrough => TextDecorationFlags.Strikethrough,
-                TextDecorationLocation.Overline => TextDecorationFlags.Overline,
-                TextDecorationLocation.Baseline => TextDecorationFlags.Baseline,
-                _ => TextDecorationFlags.None,
-            };
-        }
-
-        return flags;
     }
 
     private static bool ColorsAreClose(Avalonia.Media.Color left, Avalonia.Media.Color right)
@@ -1975,14 +3017,24 @@ public partial class TerminalControl : Grid
     internal IBrush SelectionBrushForTests => ResolveSelectionBrush();
     internal IBrush ResolveXtermColorForTests(int xtermColor) => ResolvePaletteBrush(xtermColor);
     internal IBrush ResolveColorForTests(int color) => ResolveColorBrush(color);
+    internal IBrush ResolveUnderlineColorForTests(ViewportTextRun run) => run.UnderlineColor >= 0
+        ? ResolveColorBrush(run.UnderlineColor, run.UnderlineColorIsRgb)
+        : ResolveColorBrush(run.ForegroundColor);
 }
 
 internal readonly record struct FormattedTextCacheKey(
     string Text,
     int ForegroundColor,
+    int BackgroundColor,
     FontWeight FontWeight,
     FontStyle FontStyle,
-    TextDecorationFlags TextDecorations);
+    UnderlineStyle UnderlineStyle,
+    int UnderlineColor,
+    bool UnderlineColorIsRgb,
+    bool Overline,
+    bool Dim,
+    bool Invisible,
+    bool Strikethrough);
 
 internal readonly record struct PressedKeyId(PhysicalKey PhysicalKey, Key Key)
 {
@@ -1997,13 +3049,3 @@ internal readonly record struct PressedKeyId(PhysicalKey PhysicalKey, Key Key)
 }
 
 internal readonly record struct PressedKey(string Key, string Code);
-
-[Flags]
-internal enum TextDecorationFlags
-{
-    None = 0,
-    Underline = 1 << 0,
-    Strikethrough = 1 << 1,
-    Overline = 1 << 2,
-    Baseline = 1 << 3,
-}
