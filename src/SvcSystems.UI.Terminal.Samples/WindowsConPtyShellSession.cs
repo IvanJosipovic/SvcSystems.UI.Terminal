@@ -6,10 +6,15 @@ using System.Text;
 
 namespace SvcSystems.UI.Terminal.Samples;
 
-internal sealed class WindowsConPtyShellSession(ShellLaunchConfiguration launch) : IShellSession
+internal sealed class WindowsConPtyShellSession(
+    ShellLaunchConfiguration launch,
+    int initialCols = 80,
+    int initialRows = 25) : IShellSession
 {
     private readonly ShellLaunchConfiguration _launch = launch;
     private readonly object _syncRoot = new();
+    private readonly int _initialCols = Math.Clamp(initialCols, 1, short.MaxValue);
+    private readonly int _initialRows = Math.Clamp(initialRows, 1, short.MaxValue);
 
     private WindowsPseudoConsoleSafeHandle? _pseudoConsole;
 
@@ -24,6 +29,8 @@ internal sealed class WindowsConPtyShellSession(ShellLaunchConfiguration launch)
     private Process? _process;
 
     private CancellationTokenSource? _lifetimeCancellation;
+
+    private Task? _outputPumpTask;
 
     private bool _isDisposed;
 
@@ -57,12 +64,16 @@ internal sealed class WindowsConPtyShellSession(ShellLaunchConfiguration launch)
             NativeMethods.ClearHandleInheritance(inputWriteHandle);
             NativeMethods.ClearHandleInheritance(outputReadHandle);
 
-            var result = NativeMethods.CreatePseudoConsole(
-                new Coord(80, 25),
-                inputReadHandle.DangerousGetHandle(),
-                outputWriteHandle.DangerousGetHandle(),
-                0,
-                out var pseudoConsoleHandle);
+            var result = CreatePseudoConsoleWithFallback(
+                PreferredPseudoConsoleFlags,
+                (uint flags, out IntPtr handle) => NativeMethods.CreatePseudoConsole(
+                    new Coord((short)_initialCols, (short)_initialRows),
+                    inputReadHandle.DangerousGetHandle(),
+                    outputWriteHandle.DangerousGetHandle(),
+                    flags,
+                    out handle),
+                out var pseudoConsoleHandle,
+                out _);
 
             if (result != 0)
             {
@@ -82,7 +93,7 @@ internal sealed class WindowsConPtyShellSession(ShellLaunchConfiguration launch)
             _outputStream = new FileStream(_outputReadHandle, FileAccess.Read, 4096, isAsync: false);
             _lifetimeCancellation = new CancellationTokenSource();
 
-            _ = Task.Run(() => PumpOutput(_outputStream, _lifetimeCancellation.Token));
+            _outputPumpTask = Task.Run(() => PumpOutput(_outputStream, _lifetimeCancellation.Token));
             _ = WaitForExitAsync(_lifetimeCancellation.Token);
         }
         catch
@@ -139,9 +150,12 @@ internal sealed class WindowsConPtyShellSession(ShellLaunchConfiguration launch)
 
     public void Dispose()
     {
+        WindowsPseudoConsoleSafeHandle? pseudoConsole;
         lock (_syncRoot)
         {
             _isDisposed = true;
+            pseudoConsole = _pseudoConsole;
+            _pseudoConsole = null;
         }
 
         _lifetimeCancellation?.Cancel();
@@ -172,8 +186,7 @@ internal sealed class WindowsConPtyShellSession(ShellLaunchConfiguration launch)
         _process?.Dispose();
         _process = null;
 
-        _pseudoConsole?.Dispose();
-        _pseudoConsole = null;
+        pseudoConsole?.Dispose();
 
         _inputWriteHandle?.Dispose();
         _inputWriteHandle = null;
@@ -245,18 +258,12 @@ internal sealed class WindowsConPtyShellSession(ShellLaunchConfiguration launch)
 
             var startupInfo = new StartupInfoEx();
             startupInfo.StartupInfo.cb = Marshal.SizeOf<StartupInfoEx>();
+            startupInfo.StartupInfo.dwFlags = NativeMethods.STARTF_USESTDHANDLES;
             startupInfo.lpAttributeList = attributeList;
 
             commandLine = Marshal.StringToHGlobalUni(BuildCommandLine(_launch));
 
-            var environmentVariables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
-            {
-                environmentVariables[(string)entry.Key] = (string?)entry.Value ?? string.Empty;
-            }
-
-            environmentVariables["TERM"] = "xterm-256color";
-            environmentVariables["COLORTERM"] = "truecolor";
+            var environmentVariables = ShellControl.CreateShellEnvironment();
             environmentBlock = Marshal.StringToHGlobalUni(BuildEnvironmentBlock(environmentVariables));
 
             if (!NativeMethods.CreateProcess(
@@ -340,6 +347,12 @@ internal sealed class WindowsConPtyShellSession(ShellLaunchConfiguration launch)
         try
         {
             await _process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            ClosePseudoConsole();
+            if (_outputPumpTask is not null)
+            {
+                await _outputPumpTask.ConfigureAwait(false);
+            }
+
             Exited?.Invoke(_process.ExitCode);
         }
         catch (OperationCanceledException)
@@ -349,6 +362,75 @@ internal sealed class WindowsConPtyShellSession(ShellLaunchConfiguration launch)
         {
         }
     }
+
+    private void ClosePseudoConsole()
+    {
+        WindowsPseudoConsoleSafeHandle? pseudoConsole;
+        lock (_syncRoot)
+        {
+            pseudoConsole = _pseudoConsole;
+            _pseudoConsole = null;
+        }
+
+        pseudoConsole?.Dispose();
+    }
+
+    /// <summary>
+    /// Flags requested when creating the pseudo console.
+    /// </summary>
+    /// <remarks>
+    /// The grapheme-cluster width flag (<c>PSEUDOCONSOLE_GLYPH_WIDTH_GRAPHEMES</c>, from the Windows
+    /// Terminal <c>conpty-static.h</c> header) makes ConPTY measure cell widths like the terminal
+    /// engine instead of the legacy per-code-unit console widths, so wide, emoji, and combined
+    /// glyphs keep the width the control expects when the sample's local shell is hosted in ConPTY.
+    /// East Asian ambiguous width is left at the console default because the engine reports
+    /// ambiguous characters as narrow (<c>ambiguous_width = 1</c>); <c>PSEUDOCONSOLE_AMBIGUOUS_IS_WIDE</c>
+    /// is intentionally not set.
+    /// </remarks>
+    internal const uint PreferredPseudoConsoleFlags = NativeMethods.PSEUDOCONSOLE_GLYPH_WIDTH_GRAPHEMES;
+
+    /// <summary>
+    /// Creates a pseudo console with <paramref name="preferredFlags"/>, retrying with the legacy
+    /// default flags (<c>0</c>) when the operating system rejects them.
+    /// </summary>
+    /// <param name="preferredFlags">The flags to request first.</param>
+    /// <param name="create">The native creation call; extracted so the policy can be unit tested.</param>
+    /// <param name="pseudoConsoleHandle">The handle from the successful attempt, or <see cref="IntPtr.Zero"/>.</param>
+    /// <param name="effectiveFlags">The flags of the last attempt.</param>
+    /// <returns>The <c>HRESULT</c> of the last attempt.</returns>
+    /// <remarks>
+    /// The glyph-width flags are only understood by newer Windows builds. Older builds reject the
+    /// call (typically <c>E_INVALIDARG</c>), so the sample retries once without them to keep the
+    /// shell starting everywhere. When a build simply ignores unknown bits, the first attempt
+    /// succeeds and no retry happens.
+    /// </remarks>
+    internal static int CreatePseudoConsoleWithFallback(
+        uint preferredFlags,
+        PseudoConsoleCreator create,
+        out IntPtr pseudoConsoleHandle,
+        out uint effectiveFlags)
+    {
+        int result = create(preferredFlags, out pseudoConsoleHandle);
+        effectiveFlags = preferredFlags;
+
+        if (result >= 0 || preferredFlags == 0)
+        {
+            return result;
+        }
+
+        pseudoConsoleHandle = IntPtr.Zero;
+        result = create(0, out pseudoConsoleHandle);
+        effectiveFlags = 0;
+        return result;
+    }
+
+    /// <summary>
+    /// Issues a pseudo console creation attempt for the supplied flags.
+    /// </summary>
+    /// <param name="flags">The <c>CreatePseudoConsole</c> flags to attempt.</param>
+    /// <param name="pseudoConsoleHandle">The created pseudo console handle on success.</param>
+    /// <returns>The <c>HRESULT</c> of the attempt.</returns>
+    internal delegate int PseudoConsoleCreator(uint flags, out IntPtr pseudoConsoleHandle);
 
     internal static string BuildCommandLine(ShellLaunchConfiguration launch)
     {
@@ -507,6 +589,11 @@ internal sealed class WindowsConPtyShellSession(ShellLaunchConfiguration launch)
         internal const int HANDLE_FLAG_INHERIT = 0x00000001;
         internal const int EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
         internal const int CREATE_UNICODE_ENVIRONMENT = 0x00000400;
+        internal const int STARTF_USESTDHANDLES = 0x00000100;
+
+        // CreatePseudoConsole flags (see the Windows Terminal conpty-static.h header).
+        internal const uint PSEUDOCONSOLE_GLYPH_WIDTH_GRAPHEMES = 0x00000008;
+
         internal static readonly IntPtr PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = (IntPtr)0x00020016;
 
         [DllImport("kernel32.dll", SetLastError = true)]

@@ -1,6 +1,9 @@
+using System.Buffers;
+using System.Text;
 using Avalonia.Media;
 using SvcSystems.UI.Terminal;
 using SvcSystems.UI.Terminal.Samples;
+using XTerm.Common;
 using Xunit;
 
 namespace SvcSystems.UI.Terminal.Tests;
@@ -76,6 +79,94 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
     }
 
     [Fact]
+    public Task Feed_ForwardsTerminalQueryRepliesThroughUserInput()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var model = new TerminalControlModel();
+            List<string> replies = [];
+            model.UserInput += (_, e) => replies.Add(System.Text.Encoding.UTF8.GetString(e.Data.Span));
+
+            model.Feed("\u001b[c");
+
+            Assert.Contains(replies, static reply => reply.StartsWith("\u001b[?", StringComparison.Ordinal));
+            Assert.Contains(replies, static reply => reply.Contains(";4;", StringComparison.Ordinal));
+
+            replies.Clear();
+            model.Feed("\u001b[6n");
+
+            Assert.Contains("\u001b[1;1R", replies);
+
+            replies.Clear();
+            model.Feed("\u001bP+q5375\u001b\\");
+
+            Assert.Contains("\u001bP1+r5375=\u001b\\", replies);
+        });
+    }
+
+    [Fact]
+    public Task Feed_ForwardsUcsDetectCapabilityRepliesThroughUserInput()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            using var model = new TerminalControlModel(new TerminalOptions { ClipboardReadEnabled = true });
+            List<string> replies = [];
+            model.UserInput += (_, e) => replies.Add(Encoding.UTF8.GetString(e.Data.Span));
+
+            model.Feed("\u001b]10;?\u0007\u001b]11;?\u0007");
+            model.Feed("\u001bP$qm\u001b\\");
+            model.Feed("\u001b[?2026$p\u001b[?2048$p\u001b[?5522$p");
+            model.Feed("\u001bP+q4D73;524742;5375\u001b\\");
+            model.Feed("\u001b]1337;Capabilities\u0007");
+            model.Feed("\u001b]99;i=blessed:p=?\u001b\\");
+            model.Feed("\u001b]22;?__current__\u001b\\");
+            model.Feed("\u001b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\u001b\\");
+
+            Assert.Contains(replies, static reply => reply.StartsWith("\u001b]10;rgb:", StringComparison.Ordinal));
+            Assert.Contains(replies, static reply => reply.StartsWith("\u001b]11;rgb:", StringComparison.Ordinal));
+            Assert.Contains(replies, static reply => reply.StartsWith("\u001bP1$r", StringComparison.Ordinal) && reply.EndsWith("m\u001b\\", StringComparison.Ordinal));
+            Assert.Contains("\u001b[?2026;2$y", replies);
+            Assert.Contains("\u001b[?2048;2$y", replies);
+            Assert.Contains("\u001b[?5522;2$y", replies);
+            Assert.Contains(replies, static reply => reply.StartsWith("\u001bP1+r4D73=", StringComparison.Ordinal));
+            Assert.Contains(replies, static reply => reply.StartsWith("\u001bP1+r524742=", StringComparison.Ordinal));
+            Assert.Contains(replies, static reply => reply.StartsWith("\u001bP1+r5375=", StringComparison.Ordinal));
+            Assert.Contains(replies, static reply => reply.StartsWith("\u001b]1337;Capabilities=", StringComparison.Ordinal));
+            Assert.Contains(replies, static reply => reply.StartsWith("\u001b]99;", StringComparison.Ordinal));
+            Assert.Contains("\u001b]22;0\u001b\\", replies);
+            Assert.Contains(replies, static reply => reply.StartsWith("\u001b_Gi=31;OK", StringComparison.Ordinal));
+        });
+    }
+
+    [Fact]
+    public Task SynchronizedOutput_DefersViewportUpdatesUntilTheModeEnds()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            using var model = new TerminalControlModel(new TerminalOptions { Cols = 20, Rows = 2 });
+            int refreshCount = 0;
+            model.UpdateUI = () => refreshCount++;
+
+            model.Feed("before");
+            string originalViewport = model.ViewportRows[0].Runs[0].Text;
+            int refreshesBeforeSync = refreshCount;
+
+            model.Feed("\u001b[?2026h");
+            model.Feed("\u001b[1;1H\u001b[2Kafter");
+
+            Assert.True(model.Terminal.Engine.SynchronizedOutput);
+            Assert.Equal(originalViewport, model.ViewportRows[0].Runs[0].Text);
+            Assert.Equal(refreshesBeforeSync, refreshCount);
+
+            model.Feed("\u001b[?2026l");
+
+            Assert.False(model.Terminal.Engine.SynchronizedOutput);
+            Assert.Equal("after", model.ViewportRows[0].Runs[0].Text.TrimEnd());
+            Assert.Equal(refreshesBeforeSync + 1, refreshCount);
+        });
+    }
+
+    [Fact]
     public Task Resize_IgnoresZeroSizedViewport()
     {
         return RunInHeadlessSession(() =>
@@ -130,7 +221,7 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
             Assert.Equal("A", cell.Text);
             Assert.Equal(FontWeight.Bold, cell.FontWeight);
             Assert.Equal(FontStyle.Italic, cell.FontStyle);
-            Assert.Contains(cell.TextDecorations!, decoration => decoration.Location == TextDecorationLocation.Underline);
+            Assert.Equal(UnderlineStyle.Single, cell.UnderlineStyle);
             Assert.Equal(1, cell.ForegroundColor);
             Assert.Equal(7, cell.BackgroundColor);
             Assert.Equal(1, refreshCount);
@@ -177,7 +268,9 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
 
             var text = GetCellText(model, 0, 0);
             Assert.False(string.IsNullOrEmpty(text));
-            Assert.DoesNotContain(text, static ch => char.IsSurrogate(ch));
+            Assert.Equal(OperationStatus.Done, Rune.DecodeFromUtf16(text.AsSpan(), out Rune rune, out int charsConsumed));
+            Assert.Equal(text.Length, charsConsumed);
+            Assert.Equal(0x1F600, rune.Value);
         });
     }
 
@@ -457,6 +550,23 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
         });
     }
 
+    [Theory]
+    [InlineData("👨‍👩‍👧‍👦")]
+    [InlineData("🇯🇵")]
+    [InlineData("👍🏽")]
+    public Task Feed_UnicodeGraphemePreservesItsTextAndCellWidth(string grapheme)
+    {
+        return RunInHeadlessSession(() =>
+        {
+            using TerminalControlModel model = new(new TerminalOptions { Cols = 10, Rows = 2 });
+
+            model.Feed(grapheme);
+
+            Assert.Equal(2, model.Terminal.Buffer.X);
+            Assert.Contains(model.ViewportRows[0].Runs, run => run.StartColumn == 0 && run.CellWidth == 2 && run.Text == grapheme);
+        });
+    }
+
     [Fact]
     public Task Feed_InverseDefaultColorsStayReadable()
     {
@@ -519,6 +629,11 @@ public sealed class TerminalControlModelTests : AvaloniaTestBase
         if (run.CellWidth == 2 && offset == 1)
         {
             return " ";
+        }
+
+        if (run.CellWidth == 2)
+        {
+            return run.Text;
         }
 
         if (offset < 0 || offset >= run.Text.Length)

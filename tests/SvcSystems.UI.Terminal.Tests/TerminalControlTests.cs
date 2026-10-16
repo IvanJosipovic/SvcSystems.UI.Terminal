@@ -15,6 +15,74 @@ namespace SvcSystems.UI.Terminal.Tests;
 public sealed class TerminalControlTests : AvaloniaTestBase
 {
     [Fact]
+    public Task PixelSizeQueries_ReportTheArrangedGridAndCellMetrics()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            using var model = new TerminalControlModel();
+            var control = new TerminalControl { Model = model, Width = 811, Height = 389 };
+            var window = new Window { Width = 811, Height = 389, Content = control };
+            List<string> replies = [];
+            model.UserInput += (_, e) => replies.Add(Encoding.UTF8.GetString(e.Data.Span));
+
+            try
+            {
+                window.Show();
+                window.UpdateLayout();
+                Dispatcher.UIThread.RunJobs();
+
+                model.Feed("\u001b[14t\u001b[16t");
+
+                int cellWidth = model.Terminal.Options.CellWidthPixels;
+                int cellHeight = model.Terminal.Options.CellHeightPixels;
+                Assert.Equal(
+                    [$"\u001b[4;{model.Terminal.Rows * cellHeight};{model.Terminal.Cols * cellWidth}t",
+                     $"\u001b[6;{cellHeight};{cellWidth}t"],
+                    replies);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public Task Paste_UsesTerminalBracketedPasteMode()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            List<string> sent = [];
+            model.UserInput += (_, e) => sent.Add(Encoding.UTF8.GetString(e.Data.Span));
+
+            model.Feed("\u001b[?2004h");
+            control.Paste("pasted text");
+
+            Assert.Equal(["\u001b[200~pasted text\u001b[201~"], sent);
+        });
+    }
+
+    [Fact]
+    public Task Paste_UsesKittyPasteNotificationWhenRequested()
+    {
+        return RunInHeadlessSession(() =>
+        {
+            var control = CreateControl(out var model, out _);
+            List<string> sent = [];
+            model.UserInput += (_, e) => sent.Add(Encoding.UTF8.GetString(e.Data.Span));
+
+            model.Feed("\u001b[?5522h");
+            control.Paste("pasted text");
+
+            Assert.Equal(3, sent.Count);
+            Assert.StartsWith("\u001b]5522;type=read:status=OK", sent[0], StringComparison.Ordinal);
+            Assert.Contains("type=read:status=DATA:mime=", sent[1], StringComparison.Ordinal);
+            Assert.Contains("type=read:status=DONE", sent[2], StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public Task PointerWheel_ScrollsTerminalViewportThroughModel()
     {
         return RunInHeadlessSession(() =>
@@ -420,7 +488,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
             control.HandleSelectionReleased(control.GetCellCenter(selectionStart + 1, 0), KeyModifiers.None, clickCount: 2);
 
             Assert.True(model.HasSelection);
-            Assert.Equal("sel", model.SelectedText);
+            Assert.Equal("selection", model.SelectedText);
         });
     }
 
@@ -1270,6 +1338,33 @@ public sealed class TerminalControlTests : AvaloniaTestBase
     }
 
     [Fact]
+    public void ShellSample_CreatesEnvironmentForThisTerminalInsteadOfInheritingParentIdentity()
+    {
+        var environment = ShellControl.CreateShellEnvironment(new Dictionary<string, string>
+        {
+            ["PATH"] = "parent-path",
+            ["TERM"] = "screen-256color",
+            ["COLORTERM"] = "24bit",
+            ["TERM_PROGRAM"] = "vscode",
+            ["TERM_PROGRAM_VERSION"] = "1.141.2",
+            ["KITTY_WINDOW_ID"] = "42",
+            ["WT_SESSION"] = "session-id",
+            ["COLUMNS"] = "80",
+            ["LINES"] = "24",
+        });
+
+        Assert.Equal("parent-path", environment["PATH"]);
+        Assert.Equal("xterm", environment["TERM"]);
+        Assert.Equal("truecolor", environment["COLORTERM"]);
+        Assert.False(environment.ContainsKey("TERM_PROGRAM"));
+        Assert.False(environment.ContainsKey("TERM_PROGRAM_VERSION"));
+        Assert.False(environment.ContainsKey("KITTY_WINDOW_ID"));
+        Assert.False(environment.ContainsKey("WT_SESSION"));
+        Assert.False(environment.ContainsKey("COLUMNS"));
+        Assert.False(environment.ContainsKey("LINES"));
+    }
+
+    [Fact]
     public void ShellSample_CreateShellSession_UsesRedirectedSessionOffWindows()
     {
         var redirected = new FakeShellSession();
@@ -1290,6 +1385,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
         var session = ShellControl.CreateShellSession(
             new ShellLaunchConfiguration("pwsh.exe", ["-NoLogo"], "pwsh.exe"),
             isWindowsOverride: true,
+            isWslAvailable: static () => false,
             redirectedFactory: _ => throw new InvalidOperationException("Redirected fallback should not be used."),
             conPtyFactory: _ => conPty);
 
@@ -1304,6 +1400,7 @@ public sealed class TerminalControlTests : AvaloniaTestBase
         var session = ShellControl.CreateShellSession(
             new ShellLaunchConfiguration("pwsh.exe", ["-NoLogo"], "pwsh.exe"),
             isWindowsOverride: true,
+            isWslAvailable: static () => false,
             redirectedFactory: _ => redirected,
             conPtyFactory: _ => new ThrowingShellSession(new PlatformNotSupportedException("ConPTY unavailable")));
 

@@ -34,8 +34,11 @@ internal sealed class RedirectedShellSession(ShellLaunchConfiguration launch) : 
             startInfo.ArgumentList.Add(argument);
         }
 
-        startInfo.Environment["TERM"] = "xterm-256color";
-        startInfo.Environment["COLORTERM"] = "truecolor";
+        startInfo.Environment.Clear();
+        foreach (var entry in ShellControl.CreateShellEnvironment())
+        {
+            startInfo.Environment[entry.Key] = entry.Value;
+        }
 
         _process = new Process
         {
