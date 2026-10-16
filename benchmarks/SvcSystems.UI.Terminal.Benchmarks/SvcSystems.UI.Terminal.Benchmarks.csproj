@@ -12,6 +12,6 @@
     <ProjectReference Include="..\..\src\SvcSystems.UI.Terminal\SvcSystems.UI.Terminal.csproj" />
     <PackageReference Include="Avalonia.Headless" Version="12.1.4" />
     <PackageReference Include="Avalonia.Skia" Version="12.1.4" />
-    <PackageReference Include="BenchmarkDotNet" Version="0.15.2" />
+    <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
   </ItemGroup>
 </Project>
