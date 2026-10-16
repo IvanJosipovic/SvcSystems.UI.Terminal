@@ -36,6 +36,8 @@ internal sealed class WslShellSession : IShellSession
     private static readonly TimeSpan DeviceResolutionDelay = TimeSpan.FromMilliseconds(150);
 
     private readonly ShellLaunchConfiguration _launch;
+    private readonly string _wslExecutable;
+    private readonly bool _isWindows;
     private readonly string _deviceFilePath =
         $"{GuestDeviceDirectory}/{GuestDevicePrefix}{Guid.NewGuid():N}{GuestDeviceExtension}";
     private readonly object _syncRoot = new();
@@ -52,8 +54,22 @@ internal sealed class WslShellSession : IShellSession
     private bool _isDisposed;
 
     public WslShellSession(ShellLaunchConfiguration launch, int initialCols = 80, int initialRows = 25)
+        : this(launch, WslExecutable, OperatingSystem.IsWindows(), initialCols, initialRows)
     {
+    }
+
+    internal WslShellSession(
+        ShellLaunchConfiguration launch,
+        string wslExecutable,
+        bool isWindows,
+        int initialCols = 80,
+        int initialRows = 25)
+    {
+        ArgumentNullException.ThrowIfNull(launch);
+        ArgumentException.ThrowIfNullOrWhiteSpace(wslExecutable);
         _launch = launch;
+        _wslExecutable = wslExecutable;
+        _isWindows = isWindows;
         _initialCols = Math.Clamp(initialCols, 1, short.MaxValue);
         _initialRows = Math.Clamp(initialRows, 1, short.MaxValue);
     }
@@ -175,7 +191,7 @@ internal sealed class WslShellSession : IShellSession
 
     public void Start()
     {
-        if (!OperatingSystem.IsWindows())
+        if (!_isWindows)
         {
             throw new PlatformNotSupportedException("The WSL shell session is only available on Windows.");
         }
@@ -188,7 +204,7 @@ internal sealed class WslShellSession : IShellSession
             DefaultTerminal,
             DefaultColorTerm);
 
-        ProcessStartInfo startInfo = new(WslExecutable)
+        ProcessStartInfo startInfo = new(_wslExecutable)
         {
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
@@ -488,7 +504,7 @@ internal sealed class WslShellSession : IShellSession
         return null;
     }
 
-    private static async Task<string?> ReadGuestFileAsync(string guestPath)
+    private async Task<string?> ReadGuestFileAsync(string guestPath)
     {
         ProcessStartInfo startInfo = CreateWslStartInfo();
         startInfo.ArgumentList.Add("--exec");
@@ -513,7 +529,7 @@ internal sealed class WslShellSession : IShellSession
         }
     }
 
-    private static async Task ApplyResizeAsync(string device, (int cols, int rows) size)
+    private async Task ApplyResizeAsync(string device, (int cols, int rows) size)
     {
         ProcessStartInfo startInfo = CreateWslStartInfo();
         startInfo.ArgumentList.Add("--exec");
@@ -540,9 +556,9 @@ internal sealed class WslShellSession : IShellSession
         }
     }
 
-    private static ProcessStartInfo CreateWslStartInfo()
+    private ProcessStartInfo CreateWslStartInfo()
     {
-        return new ProcessStartInfo(WslExecutable)
+        return new ProcessStartInfo(_wslExecutable)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,

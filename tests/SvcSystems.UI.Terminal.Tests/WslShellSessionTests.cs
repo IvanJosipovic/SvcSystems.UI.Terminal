@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Diagnostics;
+using System.Text;
 using SvcSystems.UI.Terminal.Samples;
 using Xunit;
 
@@ -126,6 +128,76 @@ public sealed class WslShellSessionTests
                 hasPendingResize,
                 hasResolvedDevice,
                 resolutionCycles));
+    }
+
+    [Fact]
+    public async Task WslSession_PumpsGuestInputAndAppliesResizeAfterResolvingPty()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("The fake wsl.exe integration test requires a POSIX process host.");
+            return;
+        }
+
+        string directory = Path.Combine(Path.GetTempPath(), $"svc-wsl-session-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        string fakeWsl = Path.Combine(directory, "wsl.exe");
+        string resizeLog = Path.Combine(directory, "resize.log");
+        string logArgument = WslShellSession.QuotePosixArgument(resizeLog);
+        string script =
+            "#!/bin/sh\n" +
+            "case \"$2\" in\n" +
+            "  script) printf 'session-ready\\n'; cat ;;\n" +
+            "  cat) printf '/dev/pts/fake\\n' ;;\n" +
+            $"  stty) printf '%s\\n' \"$*\" >> {logArgument} ;;\n" +
+            "  *) exit 2 ;;\n" +
+            "esac\n";
+        await File.WriteAllTextAsync(fakeWsl, script, Encoding.UTF8, TestContext.Current.CancellationToken);
+        File.SetUnixFileMode(
+            fakeWsl,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+        using WslShellSession session = new(
+            new ShellLaunchConfiguration("bash", ["-i"], "bash"),
+            fakeWsl,
+            isWindows: true,
+            initialCols: 80,
+            initialRows: 25);
+        TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource echoed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        session.DataReceived += data =>
+        {
+            string text = Encoding.UTF8.GetString(data);
+            if (text.Contains("session-ready", StringComparison.Ordinal))
+            {
+                ready.TrySetResult();
+            }
+
+            if (text.Contains("input-marker", StringComparison.Ordinal))
+            {
+                echoed.TrySetResult();
+            }
+        };
+
+        try
+        {
+            session.Start();
+            await ready.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+            session.Send(Encoding.UTF8.GetBytes("input-marker\n"));
+            await echoed.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+            session.Resize(132, 29);
+            await WaitForFileTextAsync(
+                resizeLog,
+                "stty -F /dev/pts/fake rows 29 cols 132",
+                TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            session.Dispose();
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     [Fact]
@@ -262,5 +334,22 @@ public sealed class WslShellSessionTests
         public void Dispose()
         {
         }
+    }
+
+    private static async Task WaitForFileTextAsync(string path, string expected, CancellationToken cancellationToken)
+    {
+        Stopwatch timer = Stopwatch.StartNew();
+        while (timer.Elapsed < TimeSpan.FromSeconds(5))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (File.Exists(path) && (await File.ReadAllTextAsync(path, cancellationToken)).Contains(expected, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(25), cancellationToken);
+        }
+
+        Assert.Fail($"Did not find '{expected}' in '{path}' before the timeout.");
     }
 }
