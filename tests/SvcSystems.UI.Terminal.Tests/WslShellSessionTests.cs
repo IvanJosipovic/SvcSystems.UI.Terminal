@@ -152,7 +152,11 @@ public sealed class WslShellSessionTests
             $"  stty) printf '%s\\n' \"$*\" >> {logArgument} ;;\n" +
             "  *) exit 2 ;;\n" +
             "esac\n";
-        await File.WriteAllTextAsync(fakeWsl, script, Encoding.UTF8, TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(
+            fakeWsl,
+            script,
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            TestContext.Current.CancellationToken);
         File.SetUnixFileMode(
             fakeWsl,
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
