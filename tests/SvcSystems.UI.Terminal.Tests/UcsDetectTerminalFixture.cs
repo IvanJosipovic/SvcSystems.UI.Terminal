@@ -18,8 +18,10 @@ public sealed class UcsDetectTerminalFixture : AvaloniaTestBase, IAsyncLifetime
     private const int CompletedFrame = 2;
     private const int ErrorFrame = 3;
     private const long MaximumControlFrameBytes = 1024 * 1024;
+    private const string WslDistribution = "Ubuntu";
     private static readonly TimeSpan RunTimeout = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan ProcessExitTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan DependencySetupTimeout = TimeSpan.FromMinutes(10);
     private static readonly IReadOnlyDictionary<string, string> ExpectedVersions = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["ucs_detect"] = "2.3.8",
@@ -37,6 +39,7 @@ public sealed class UcsDetectTerminalFixture : AvaloniaTestBase, IAsyncLifetime
     };
 
     private Process? _bridge;
+    private string? _pythonExecutable;
     private bool _bridgeStarted;
     private TerminalControlModel? _model;
     private TerminalControl? _control;
@@ -65,6 +68,15 @@ public sealed class UcsDetectTerminalFixture : AvaloniaTestBase, IAsyncLifetime
             throw new InvalidOperationException(
                 $"The ucs-detect helper was not copied to the test output: {helperPath}");
         }
+
+        string requirementsPath = Path.Combine(AppContext.BaseDirectory, "requirements-ucs-detect.txt");
+        if (!File.Exists(requirementsPath))
+        {
+            throw new InvalidOperationException(
+                $"The ucs-detect requirements were not copied to the test output: {requirementsPath}");
+        }
+
+        await EnsurePythonDependenciesAsync(helperPath, requirementsPath);
 
         string artifactDirectory = Environment.GetEnvironmentVariable("UCS_DETECT_ARTIFACTS") ??
             Path.Combine(AppContext.BaseDirectory, "TestResults", "ucs-detect");
@@ -185,21 +197,21 @@ public sealed class UcsDetectTerminalFixture : AvaloniaTestBase, IAsyncLifetime
         SendFrame(TerminalInputFrame, input);
     }
 
-    private static ProcessStartInfo CreateBridgeStartInfo(string helperPath)
+    private ProcessStartInfo CreateBridgeStartInfo(string helperPath)
     {
         ProcessStartInfo startInfo;
         if (OperatingSystem.IsWindows())
         {
             startInfo = new ProcessStartInfo("wsl.exe");
             startInfo.ArgumentList.Add("--distribution");
-            startInfo.ArgumentList.Add("Ubuntu");
+            startInfo.ArgumentList.Add(WslDistribution);
             startInfo.ArgumentList.Add("--exec");
-            startInfo.ArgumentList.Add(Environment.GetEnvironmentVariable("UCS_DETECT_WSL_PYTHON") ?? "python3");
+            startInfo.ArgumentList.Add(_pythonExecutable ?? throw new InvalidOperationException("The WSL Python environment was not initialized."));
             startInfo.ArgumentList.Add(ToWslPath(helperPath));
         }
         else
         {
-            startInfo = new ProcessStartInfo(Environment.GetEnvironmentVariable("UCS_DETECT_PYTHON") ?? "python3");
+            startInfo = new ProcessStartInfo(_pythonExecutable ?? throw new InvalidOperationException("The Python environment was not initialized."));
             startInfo.ArgumentList.Add(helperPath);
         }
 
@@ -209,6 +221,171 @@ public sealed class UcsDetectTerminalFixture : AvaloniaTestBase, IAsyncLifetime
         startInfo.RedirectStandardError = true;
         startInfo.CreateNoWindow = true;
         return startInfo;
+    }
+
+    private async Task EnsurePythonDependenciesAsync(string helperPath, string requirementsPath)
+    {
+        bool dependenciesInstalled = false;
+        if (OperatingSystem.IsWindows())
+        {
+            _pythonExecutable = Environment.GetEnvironmentVariable("UCS_DETECT_WSL_PYTHON");
+            if (string.IsNullOrWhiteSpace(_pythonExecutable))
+            {
+                _pythonExecutable = "python3";
+                dependenciesInstalled = await HasPinnedPythonDependenciesAsync(helperPath, requirementsPath);
+            }
+
+            if (!dependenciesInstalled && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("UCS_DETECT_WSL_PYTHON")))
+            {
+                ProcessStartInfo createEnvironment = new("wsl.exe");
+                createEnvironment.ArgumentList.Add("--distribution");
+                createEnvironment.ArgumentList.Add(WslDistribution);
+                createEnvironment.ArgumentList.Add("--exec");
+                createEnvironment.ArgumentList.Add("sh");
+                createEnvironment.ArgumentList.Add("-lc");
+                createEnvironment.ArgumentList.Add(
+                    "set -eu; venv=\"$HOME/.venvs/svc-terminal-tests\"; " +
+                    "mkdir -p \"$(dirname \"$venv\")\"; " +
+                    "if [ ! -x \"$venv/bin/python\" ]; then python3 -m venv \"$venv\"; fi; " +
+                    "printf '%s' \"$venv/bin/python\"");
+
+                (int exitCode, string output, string error) = await RunSetupProcessAsync(createEnvironment);
+                if (exitCode != 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Could not create the ucs-detect Python environment in WSL {WslDistribution}. " +
+                        "Install Python 3 with venv support in that distribution. " +
+                        $"stdout: {output}{Environment.NewLine}stderr: {error}");
+                }
+
+                _pythonExecutable = output.Trim();
+            }
+        }
+        else
+        {
+            _pythonExecutable = Environment.GetEnvironmentVariable("UCS_DETECT_PYTHON");
+            if (string.IsNullOrWhiteSpace(_pythonExecutable))
+            {
+                _pythonExecutable = "python3";
+                dependenciesInstalled = await HasPinnedPythonDependenciesAsync(helperPath, requirementsPath);
+            }
+
+            if (!dependenciesInstalled && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("UCS_DETECT_PYTHON")))
+            {
+                string localDataDirectory = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                if (string.IsNullOrWhiteSpace(localDataDirectory))
+                {
+                    localDataDirectory = Path.GetTempPath();
+                }
+
+                string venvDirectory = Path.Combine(
+                    localDataDirectory,
+                    "SvcSystems.UI.Terminal",
+                    "ucs-detect",
+                    $"python-{Environment.Version.Major}.{Environment.Version.Minor}");
+                string pythonFileName = OperatingSystem.IsWindows() ? "python.exe" : "python";
+                string venvPython = Path.Combine(
+                    venvDirectory,
+                    OperatingSystem.IsWindows() ? "Scripts" : "bin",
+                    pythonFileName);
+
+                if (!File.Exists(venvPython))
+                {
+                    ProcessStartInfo createEnvironment = new("python3");
+                    createEnvironment.ArgumentList.Add("-m");
+                    createEnvironment.ArgumentList.Add("venv");
+                    createEnvironment.ArgumentList.Add(venvDirectory);
+                    (int exitCode, string output, string error) = await RunSetupProcessAsync(createEnvironment);
+                    if (exitCode != 0)
+                    {
+                        throw new InvalidOperationException(
+                            "Could not create the ucs-detect Python virtual environment. Install Python 3 " +
+                            "with venv and pip support, or set UCS_DETECT_PYTHON to an existing virtual environment. " +
+                            $"stdout: {output}{Environment.NewLine}stderr: {error}");
+                    }
+                }
+
+                _pythonExecutable = venvPython;
+            }
+        }
+
+        if (dependenciesInstalled)
+        {
+            return;
+        }
+
+        ProcessStartInfo ensureDependencies = CreateBridgeStartInfo(helperPath);
+        ensureDependencies.ArgumentList.Add("--ensure-dependencies");
+        ensureDependencies.ArgumentList.Add(ToBridgePath(requirementsPath));
+        (int dependencyExitCode, string dependencyOutput, string dependencyError) =
+            await RunSetupProcessAsync(ensureDependencies);
+        if (dependencyExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                "The pinned ucs-detect test dependencies could not be verified or installed. " +
+                "Check that the selected Python environment has pip and network access. " +
+                $"stdout: {dependencyOutput}{Environment.NewLine}stderr: {dependencyError}");
+        }
+    }
+
+    private async Task<bool> HasPinnedPythonDependenciesAsync(string helperPath, string requirementsPath)
+    {
+        ProcessStartInfo checkDependencies = CreateBridgeStartInfo(helperPath);
+        checkDependencies.ArgumentList.Add("--check-dependencies");
+        checkDependencies.ArgumentList.Add(ToBridgePath(requirementsPath));
+        (int exitCode, string output, string error) = await RunSetupProcessAsync(checkDependencies);
+        if (exitCode == 0)
+        {
+            return true;
+        }
+
+        if (exitCode == 2)
+        {
+            return false;
+        }
+
+        throw new InvalidOperationException(
+            "Could not validate the current Python environment for ucs-detect. " +
+            $"stdout: {output}{Environment.NewLine}stderr: {error}");
+    }
+
+    private static async Task<(int ExitCode, string StandardOutput, string StandardError)> RunSetupProcessAsync(
+        ProcessStartInfo startInfo)
+    {
+        startInfo.UseShellExecute = false;
+        startInfo.RedirectStandardOutput = true;
+        startInfo.RedirectStandardError = true;
+        startInfo.CreateNoWindow = true;
+
+        using Process process = new() { StartInfo = startInfo };
+        if (!process.Start())
+        {
+            throw new InvalidOperationException($"Failed to start '{startInfo.FileName}'.");
+        }
+
+        Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
+        Task<string> standardError = process.StandardError.ReadToEndAsync();
+        using CancellationTokenSource timeout = new(DependencySetupTimeout);
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+            }
+
+            await process.WaitForExitAsync();
+            throw new TimeoutException(
+                $"Python dependency setup exceeded {DependencySetupTimeout.TotalMinutes:0} minutes.");
+        }
+
+        return (process.ExitCode, await standardOutput, await standardError);
     }
 
     private async Task RunAsync()

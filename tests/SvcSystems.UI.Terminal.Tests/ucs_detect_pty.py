@@ -12,6 +12,7 @@ import site
 import select
 import signal
 import struct
+import subprocess
 import sys
 import termios
 import time
@@ -19,6 +20,73 @@ import traceback
 
 
 MAX_CONTROL_FRAME = 1024 * 1024
+
+
+def read_pinned_requirements(requirements_path):
+    requirements = []
+    for raw_line in pathlib.Path(requirements_path).read_text(encoding="utf-8").splitlines():
+        line = raw_line.partition("#")[0].strip()
+        if not line:
+            continue
+        if "==" not in line:
+            raise ValueError(f"Expected an exact package pin in {requirements_path}: {line}")
+        name, expected = line.split("==", 1)
+        requirements.append((name.strip(), expected.strip()))
+    return requirements
+
+
+def dependency_mismatches(requirements):
+    from importlib.metadata import PackageNotFoundError, version
+
+    result = []
+    for name, expected in requirements:
+        try:
+            actual = version(name)
+        except PackageNotFoundError:
+            actual = None
+        if actual != expected:
+            result.append(f"{name}: expected {expected}, found {actual or 'missing'}")
+    return result
+
+
+def ensure_dependencies(requirements_path):
+    requirements = read_pinned_requirements(requirements_path)
+    missing = dependency_mismatches(requirements)
+    if not missing:
+        return
+
+    try:
+        install = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "-r", requirements_path],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except OSError as error:
+        raise RuntimeError(
+            "Could not run pip for the selected Python environment. Ensure it is a virtual "
+            "environment with pip available."
+        ) from error
+
+    if install.returncode != 0:
+        raise RuntimeError(
+            "Failed to install the pinned ucs-detect requirements. "
+            "Check Python/pip availability and network access.\n" + install.stdout
+        )
+
+    missing = dependency_mismatches(requirements)
+    if missing:
+        raise RuntimeError("The Python environment still does not match the pinned requirements: " + "; ".join(missing))
+
+
+def check_dependencies(requirements_path):
+    requirements = read_pinned_requirements(requirements_path)
+    missing = dependency_mismatches(requirements)
+    if missing:
+        print("Pinned ucs-detect requirements need installation: " + "; ".join(missing), file=sys.stderr)
+        return 2
+    return 0
 
 
 def read_exact(stream, count):
@@ -265,6 +333,16 @@ def main():
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and sys.argv[1] in ("--check-dependencies", "--ensure-dependencies"):
+        try:
+            result = check_dependencies(sys.argv[2]) if sys.argv[1] == "--check-dependencies" else 0
+            if sys.argv[1] == "--ensure-dependencies":
+                ensure_dependencies(sys.argv[2])
+        except BaseException:
+            traceback.print_exc(file=sys.stderr)
+            sys.exit(1)
+        sys.exit(result)
+
     try:
         main()
     except BaseException as error:

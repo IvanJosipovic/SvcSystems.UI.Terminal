@@ -26,6 +26,7 @@
 
   <ItemGroup>
     <None Include="ucs_detect_pty.py" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\requirements-ucs-detect.txt" Link="requirements-ucs-detect.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

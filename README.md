@@ -472,7 +472,10 @@ the JSON report and raw PTY transcript in the test output's
 probes reach the terminal model directly. Each run retains the detector JSON, pinned dependency
 versions, and raw PTY transcript.
 
-Install the pinned detector dependencies into a Python environment before testing:
+Before the conformance tests run, the fixture checks the Python environment against
+`tests/requirements-ucs-detect.txt`. It reuses an already-matching environment or creates a virtual
+environment and installs the pinned requirements if needed. Set `UCS_DETECT_PYTHON` to use an
+existing environment instead:
 
 ```bash
 python3 -m venv .venv-ucs-detect
@@ -480,24 +483,25 @@ python3 -m venv .venv-ucs-detect
 export UCS_DETECT_PYTHON="$PWD/.venv-ucs-detect/bin/python"
 ```
 
-On Windows, create the Python environment inside WSL Ubuntu and point the test runner to it. Replace
-the repo path with the path to this checkout:
+On Windows, the fixture creates and reuses a virtual environment in WSL Ubuntu automatically. To use
+an existing WSL environment instead, set `UCS_DETECT_WSL_PYTHON` to its Python executable. To
+provision it manually, replace the repo path with the path to this checkout:
 
 ```powershell
 wsl.exe --distribution Ubuntu --exec sh -lc 'python3 -m venv "$HOME/.venvs/svc-terminal-tests" && "$HOME/.venvs/svc-terminal-tests/bin/pip" install -r /mnt/c/repos/SvcSystems.UI.Terminal/tests/requirements-ucs-detect.txt'
 $env:UCS_DETECT_WSL_PYTHON = (wsl.exe --distribution Ubuntu --exec sh -lc 'printf "%s" "$HOME/.venvs/svc-terminal-tests/bin/python"').Trim()
 ```
 
-If WSL does not have the `venv` module available, install the distribution's `python3-venv`
-package before creating the environment. The PTY helper also includes Python's user script
+If WSL cannot create a virtual environment with pip, install the distribution's `python3-venv`
+package. The PTY helper also includes Python's user script
 directory on `PATH` for environments provisioned with user-installed CLI dependencies.
 
-Both the .NET 10 and .NET 11 SDKs/runtimes are required to run both target frameworks; the
-Linux compliance workflow installs both. The control uses the published XTerm.NET 3.0.0 NuGet
-package for terminal emulation.
+Both the .NET 10 and .NET 11 SDKs/runtimes are required to run both target frameworks. The control
+uses the published XTerm.NET 3.0.0 NuGet package for terminal emulation.
 
-The supported dependency versions are pinned in `tests/requirements-ucs-detect.txt`. The test fails
-with setup instructions when the Python environment or an expected CLI result is missing.
+The supported dependency versions are pinned in `tests/requirements-ucs-detect.txt`. If installation
+fails (for example, because Python lacks venv/pip support or the machine is offline), the fixture
+reports the setup error and the test fails with the captured diagnostic.
 
 To show the ConPTY delta is the transport rather than the engine, the opt-in
 `UcsDetectConPtyComparisonTests` diagnostic runs the same WSL `ucs-detect` with the same flags
