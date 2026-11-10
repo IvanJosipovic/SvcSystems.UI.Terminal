@@ -55,4 +55,7 @@ public sealed class TerminalOptions
     /// Disabled by default because terminal output may originate from an untrusted or remote process.
     /// </summary>
     public bool ClipboardWriteEnabled { get; set; }
+
+    /// <summary>Gets or sets whether DECRQCRA screen checksum reports are enabled.</summary>
+    public bool ChecksumReportsEnabled { get; set; }
 }
