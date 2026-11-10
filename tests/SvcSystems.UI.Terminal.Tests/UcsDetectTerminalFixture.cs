@@ -101,6 +101,7 @@ public sealed class UcsDetectTerminalFixture : AvaloniaTestBase, IAsyncLifetime
                 ReflowOnResize = false,
                 ClipboardReadEnabled = true,
                 ClipboardWriteEnabled = true,
+                ChecksumReportsEnabled = true,
             });
             _control = new TerminalControl { Model = _model };
             _control.ClipboardTextReaderOverride = () => Task.FromResult<string?>(string.Empty);

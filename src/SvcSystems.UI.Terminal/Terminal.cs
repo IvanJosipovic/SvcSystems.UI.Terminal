@@ -37,6 +37,7 @@ public sealed class Terminal : IDisposable
             KittyKeyboardEnabled = options.KittyKeyboardEnabled,
             ClipboardReadEnabled = options.ClipboardReadEnabled,
             ClipboardWriteEnabled = options.ClipboardWriteEnabled,
+            ChecksumReportsEnabled = options.ChecksumReportsEnabled,
             WindowOptions = new()
             {
                 GetWinSizePixels = true,
@@ -79,6 +80,7 @@ public sealed class Terminal : IDisposable
         KittyKeyboardEnabled = _options.KittyKeyboardEnabled,
         ClipboardReadEnabled = _options.ClipboardReadEnabled,
         ClipboardWriteEnabled = _options.ClipboardWriteEnabled,
+        ChecksumReportsEnabled = _terminal.Options.ChecksumReportsEnabled,
     };
 
     public int Cols => _terminal.Cols;
