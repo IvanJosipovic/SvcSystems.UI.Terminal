@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="12.1.5" />
+    <PackageReference Include="Avalonia" Version="12.1.6" />
     <ProjectReference Include="..\SvcSystems.UI.Terminal\SvcSystems.UI.Terminal.csproj" />
   </ItemGroup>
 
