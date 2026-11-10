@@ -141,7 +141,7 @@ public sealed class TerminalTests
 
         terminal.Feed("\u001b[>q");
 
-        Assert.Equal(["\u001bP>|XTerm.NET(3.0.3)\u001b\\"], replies);
+        Assert.Equal(["\u001bP>|XTerm.NET(3.0.2)\u001b\\"], replies);
     }
 
     [Fact]

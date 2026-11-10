@@ -42,7 +42,7 @@ public sealed class UcsDetectIntegrationTests : IClassFixture<UcsDetectTerminalF
         Assert.Equal(UcsDetectReportSchema.UnicodeVersion, root.GetProperty("unicode_version").GetString());
         Assert.Equal(UcsDetectReportSchema.WcwidthVersion, root.GetProperty("wcwidth_version").GetString());
         Assert.Equal("XTerm.NET", root.GetProperty("software_name").GetString());
-        Assert.Equal("3.0.3", root.GetProperty("software_version").GetString());
+        Assert.Equal("3.0.2", root.GetProperty("software_version").GetString());
         Assert.Equal("UTF-8", root.GetProperty("preferred_encoding").GetString());
         Assert.Equal("Linux", root.GetProperty("system").GetString());
         Assert.True(root.GetProperty("ambiguous_width").ValueKind == JsonValueKind.Number);
@@ -98,8 +98,8 @@ public sealed class UcsDetectIntegrationTests : IClassFixture<UcsDetectTerminalF
     {
         Assert.Equal("XTVERSION", Feature("software_method").GetString());
         Assert.Contains("XTerm.NET", Feature("software_name").GetString(), StringComparison.Ordinal);
-        Assert.Equal("3.0.3", Feature("software_version").GetString());
-        Assert.Equal("XTerm.NET(3.0.3)", Feature("xtversion_raw").GetString());
+        Assert.Equal("3.0.2", Feature("software_version").GetString());
+        Assert.Equal("XTerm.NET(3.0.2)", Feature("xtversion_raw").GetString());
         AssertBooleanFeature("xtversion-bad-screenleak", false);
     }
 
