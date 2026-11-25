@@ -1,6 +1,5 @@
 using Avalonia;
 using Avalonia.Media;
-using PropertyGenerator.Avalonia;
 using System.Text;
 using XTerm.Buffer;
 using XTerm.Common;

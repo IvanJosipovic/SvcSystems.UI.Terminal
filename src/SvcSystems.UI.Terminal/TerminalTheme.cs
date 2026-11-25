@@ -10,6 +10,7 @@ namespace SvcSystems.UI.Terminal;
 /// Add this style class directly to application styles. URI-based inclusion of
 /// <c>Styles/Colors.axaml</c> remains supported for compatibility but is deprecated.
 /// </remarks>
+[System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage]
 public sealed partial class TerminalTheme : Styles
 {
     /// <summary>
